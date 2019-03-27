@@ -9,3 +9,4 @@ name = "wassup"
 path = "src/main.rs"
 
 [dependencies]
+parity-wasm = "0.37.0"
