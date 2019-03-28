@@ -89,6 +89,50 @@ pub fn split_into_blocks(source: &[Instruction]) -> (Vec<Block>, &[Instruction])
 	(blocks, source)
 }
 
+pub fn blocks(source: &[Instruction]) -> Vec<Block> {
+	let (blocks, rest) = split_into_blocks(source);
+	assert!(rest.is_empty());
+	blocks
+}
+
+fn flat_blocks_mut_impl<'a>(block: &'a mut Block, flat_blocks: &mut Vec<&'a mut Vec<Instruction>>) {
+	match block {
+		Block::Flat(ins) => {
+			flat_blocks.push(ins);
+		}
+		Block::BlockIns { ty: _, inner } => {
+			for b in inner {
+				flat_blocks_mut_impl(b, flat_blocks);
+			}
+		}
+		Block::LoopIns { ty: _, inner } => {
+			for b in inner {
+				flat_blocks_mut_impl(b, flat_blocks);
+			}
+		}
+		Block::IfIns {
+			ty: _,
+			inner_true,
+			inner_false,
+		} => {
+			for b in inner_true {
+				flat_blocks_mut_impl(b, flat_blocks);
+			}
+			for b in inner_false {
+				flat_blocks_mut_impl(b, flat_blocks);
+			}
+		}
+	}
+}
+
+pub fn flat_blocks_mut(blocks: &mut Vec<Block>) -> Vec<&mut Vec<Instruction>> {
+	let mut flat_blocks = vec![];
+	for b in blocks {
+		flat_blocks_mut_impl(b, &mut flat_blocks);
+	}
+	flat_blocks
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -202,5 +246,22 @@ mod tests {
 				Instruction::I32Sub
 			]),
 		);
+	}
+
+	#[test]
+	fn flat_blocks() {
+		let mut blocks = vec![
+			Block::Flat(vec![Instruction::I32Add]),
+			Block::IfIns { ty: BlockType::NoResult, inner_true: vec![Block::Flat(vec![Instruction::I32Sub])], inner_false: vec![Block::Flat(vec![Instruction::I32Add])] },
+			Block::Flat(vec![Instruction::I32Sub]),
+		];
+		let flat_blocks = flat_blocks_mut(&mut blocks);
+		let flat_blocks_copy: Vec<Vec<Instruction>> = flat_blocks.iter().map(|x| (*x).clone()).collect();
+		assert_eq!(vec![
+			vec![Instruction::I32Add],
+			vec![Instruction::I32Sub],
+			vec![Instruction::I32Add],
+			vec![Instruction::I32Sub],
+		], flat_blocks_copy);
 	}
 }
