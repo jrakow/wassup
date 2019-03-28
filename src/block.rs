@@ -36,25 +36,26 @@ pub fn split_into_blocks(source: &[Instruction]) -> (Vec<Block>, &[Instruction])
 
 	while !source.is_empty() {
 		let i = &source[0];
+		source = &source[1..];
 		if !ins.is_empty() && instruction_starts_block(i) {
 			blocks.push(Block::Flat(replace(&mut ins, vec![])));
 		}
 
 		match i {
 			Instruction::Block(ty) => {
-				let (inner, rest) = split_into_blocks(&source[1..]);
+				let (inner, rest) = split_into_blocks(source);
 				source = rest;
 				blocks.push(Block::BlockIns { ty: *ty, inner });
 			}
 			Instruction::Loop(ty) => {
-				let (inner, rest) = split_into_blocks(&source[1..]);
+				let (inner, rest) = split_into_blocks(source);
 				source = rest;
 				blocks.push(Block::LoopIns { ty: *ty, inner });
 			}
 			Instruction::If(ty) => {
-				let (inner_true, rest) = split_into_blocks(&source[1..]);
+				let (inner_true, rest) = split_into_blocks(source);
 				source = rest;
-				let (inner_false, rest) = split_into_blocks(&source);
+				let (inner_false, rest) = split_into_blocks(source);
 				source = rest;
 				blocks.push(Block::IfIns {
 					ty: *ty,
@@ -63,11 +64,9 @@ pub fn split_into_blocks(source: &[Instruction]) -> (Vec<Block>, &[Instruction])
 				});
 			}
 			Instruction::Else | Instruction::End => {
-				source = &source[1..];
 				break;
 			}
 			Instruction::Unreachable => {
-				source = &source[1..];
 				ins.push(i.clone());
 				break;
 			}
@@ -78,7 +77,6 @@ pub fn split_into_blocks(source: &[Instruction]) -> (Vec<Block>, &[Instruction])
 			| Instruction::Call(_)
 			| Instruction::CallIndirect(..) => unimplemented!(),
 			_ => {
-				source = &source[1..];
 				ins.push(i.clone());
 			}
 		}
