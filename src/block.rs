@@ -252,16 +252,24 @@ mod tests {
 	fn flat_blocks() {
 		let mut blocks = vec![
 			Block::Flat(vec![Instruction::I32Add]),
-			Block::IfIns { ty: BlockType::NoResult, inner_true: vec![Block::Flat(vec![Instruction::I32Sub])], inner_false: vec![Block::Flat(vec![Instruction::I32Add])] },
+			Block::IfIns {
+				ty: BlockType::NoResult,
+				inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
+				inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
+			},
 			Block::Flat(vec![Instruction::I32Sub]),
 		];
 		let flat_blocks = flat_blocks_mut(&mut blocks);
-		let flat_blocks_copy: Vec<Vec<Instruction>> = flat_blocks.iter().map(|x| (*x).clone()).collect();
-		assert_eq!(vec![
-			vec![Instruction::I32Add],
-			vec![Instruction::I32Sub],
-			vec![Instruction::I32Add],
-			vec![Instruction::I32Sub],
-		], flat_blocks_copy);
+		let flat_blocks_copy: Vec<Vec<Instruction>> =
+			flat_blocks.iter().map(|x| (*x).clone()).collect();
+		assert_eq!(
+			vec![
+				vec![Instruction::I32Add],
+				vec![Instruction::I32Sub],
+				vec![Instruction::I32Add],
+				vec![Instruction::I32Sub],
+			],
+			flat_blocks_copy
+		);
 	}
 }
