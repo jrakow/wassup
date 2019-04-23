@@ -7,6 +7,19 @@ use z3_sys2::*;
 fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruction]) {
 	let word_sort = unsafe { Z3_mk_bv_sort(ctx, 32) };
 	let int_sort = unsafe { Z3_mk_int_sort(ctx) };
+	let instruction_sort = unsafe {
+		let sort_name =
+			Z3_mk_string_symbol(ctx, CString::new("instruction_sort").unwrap().as_ptr());
+		let instruction_count = 2;
+		// Z3_mk_string_symbol(ctx, CString::new("PUSH").unwrap().as_ptr()),
+		// Z3_mk_string_symbol(ctx, CString::new("ADD").unwrap().as_ptr()),
+
+		Z3_mk_finite_domain_sort(
+			ctx,
+			sort_name,
+			instruction_count,
+		)
+	};
 
 	let stack_depth = 2;
 	let stack_vars: Vec<_> = (0..stack_depth)
@@ -74,6 +87,37 @@ fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruc
 			zero,
 		))
 	};
+
+	// declare program function
+	let program_name =
+		unsafe { Z3_mk_string_symbol(ctx, CString::new("program").unwrap().as_ptr()) };
+	let program_func_domain = &[int_sort];
+	let program_func = unsafe {
+		Z3_mk_func_decl(
+			ctx,
+			program_name,
+			program_func_domain.len() as _,
+			program_func_domain.as_ptr(),
+			instruction_sort,
+		)
+	};
+	// set program to program
+	for (index, instruction) in program.iter().enumerate() {
+		unsafe {
+			let encoded = Z3_mk_int(
+				ctx,
+				match instruction {
+					Instruction::I32Const(_) => 0,
+					Instruction::I32Add => 1,
+					_ => unimplemented!(),
+				} as _,
+				instruction_sort,
+			);
+			let index = Z3_mk_int(ctx, index as _, int_sort);
+			let program_value = Z3_mk_app(ctx, program_func, 1, &index as *const _);
+			Z3_solver_assert(ctx, solver, Z3_mk_eq(ctx, encoded, program_value));
+		}
+	}
 }
 
 #[cfg(test)]
