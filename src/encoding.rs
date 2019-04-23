@@ -2,7 +2,7 @@ use parity_wasm::elements::Instruction;
 use std::convert::TryInto;
 use std::ffi::CString;
 use std::iter::once;
-use z3_sys::*;
+use z3_sys2::*;
 
 fn encode_init_conditions(ctx: Z3_context, program: &[Instruction]) {
 	let word_sort = unsafe { Z3_mk_bv_sort(ctx, 32) };
