@@ -1,10 +1,10 @@
 use parity_wasm::elements::Instruction;
 use std::convert::TryInto;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::iter::once;
 use z3_sys2::*;
 
-fn encode_init_conditions(ctx: Z3_context, program: &[Instruction]) {
+fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruction]) {
 	let word_sort = unsafe { Z3_mk_bv_sort(ctx, 32) };
 	let int_sort = unsafe { Z3_mk_int_sort(ctx) };
 
@@ -37,22 +37,17 @@ fn encode_init_conditions(ctx: Z3_context, program: &[Instruction]) {
 
 	// set stack(xs, 0, i) == xs[i]
 	let program_counter = unsafe { Z3_mk_int64(ctx, 0, int_sort) };
-	let stack_init_condition = {
-		let conditions: Vec<_> = (0..stack_depth)
-			.map(|i: usize| {
-				let stack_index = unsafe { Z3_mk_int(ctx, i as _, int_sort) };
-				let args: Vec<_> = stack_vars
-					.iter()
-					.cloned()
-					.chain(once(program_counter))
-					.chain(once(stack_index))
-					.collect();
-				let lhs = unsafe { Z3_mk_app(ctx, stack_func, args.len() as _, args.as_ptr()) };
-				let rhs = stack_vars[i];
-				unsafe { Z3_mk_eq(ctx, lhs, rhs) }
-			})
+	for i in 0..stack_depth {
+		let stack_index = unsafe { Z3_mk_int(ctx, i as _, int_sort) };
+		let args: Vec<_> = stack_vars
+			.iter()
+			.cloned()
+			.chain(once(program_counter))
+			.chain(once(stack_index))
 			.collect();
-		unsafe { Z3_mk_and(ctx, conditions.len() as _, conditions.as_ptr()) }
+		let lhs = unsafe { Z3_mk_app(ctx, stack_func, args.len() as _, args.as_ptr()) };
+		let rhs = stack_vars[i];
+		unsafe { Z3_solver_assert(ctx, solver, Z3_mk_eq(ctx, lhs, rhs)); }
 	};
 
 	// declare stack pointer function
@@ -73,11 +68,11 @@ fn encode_init_conditions(ctx: Z3_context, program: &[Instruction]) {
 	let stack_pointer_init_condition = unsafe {
 		let zero = Z3_mk_int(ctx, 0, int_sort);
 		let args = &[zero];
-		Z3_mk_eq(
+		Z3_solver_assert(ctx, solver, Z3_mk_eq(
 			ctx,
 			Z3_mk_app(ctx, stack_pointer_func, args.len() as _, args.as_ptr()),
 			zero,
-		)
+		))
 	};
 }
 
@@ -88,13 +83,19 @@ mod tests {
 	#[test]
 	fn simple() {
 		let ctx = unsafe { Z3_mk_context(Z3_mk_config()) };
+		let solver = unsafe { Z3_mk_solver(ctx) };
 		encode_init_conditions(
 			ctx,
+			solver,
 			&[
 				Instruction::I32Const(1),
 				Instruction::I32Const(2),
 				Instruction::I32Add,
 			],
-		)
+		);
+		unsafe { Z3_solver_check(ctx, solver) };
+		let model = unsafe { Z3_solver_get_model(ctx, solver) };
+		let model_string = unsafe { &CStr::from_ptr(Z3_model_to_string(ctx, model)) };
+		println!("{}", model_string.to_str().unwrap());
 	}
 }
