@@ -10,3 +10,4 @@ path = "src/main.rs"
 
 [dependencies]
 parity-wasm = "0.37.0"
+z3-sys = "0.4.0"
