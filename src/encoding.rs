@@ -127,7 +127,12 @@ mod tests {
 	#[test]
 	fn simple() {
 		let ctx = unsafe { Z3_mk_context(Z3_mk_config()) };
-		let solver = unsafe { Z3_mk_solver(ctx) };
+		let solver = unsafe {
+			let solver = Z3_mk_solver(ctx);
+			Z3_solver_inc_ref(ctx, solver);
+			solver
+		};
+		
 		encode_init_conditions(
 			ctx,
 			solver,
