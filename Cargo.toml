@@ -10,4 +10,4 @@ path = "src/main.rs"
 
 [dependencies]
 parity-wasm = "0.37.0"
-z3-sys2 = { path = "../z3-sys2" }
+z3-sys = { git = "https://github.com/jrakow/z3.rs" }

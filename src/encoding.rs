@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::ffi::{CStr, CString};
 use std::iter::once;
 use std::ptr::{null, null_mut};
-use z3_sys2::*;
+use z3_sys::*;
 
 fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruction]) {
 	let word_sort = unsafe { Z3_mk_bv_sort(ctx, 32) };
