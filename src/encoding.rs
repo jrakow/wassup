@@ -134,6 +134,53 @@ fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruc
 			Z3_solver_assert(ctx, solver, Z3_mk_eq(ctx, encoded, program_value));
 		}
 	}
+	let program_length = program.len();
+
+	// encode transition
+	for i in 0..program_length {
+		unsafe {
+			// encode stack_pointer change
+			let stack_counter_i = Z3_mk_app(
+				ctx,
+				stack_pointer_func,
+				1,
+				[Z3_mk_int(ctx, i as i32, int_sort)].as_ptr(),
+			);
+			let stack_counter_ii = Z3_mk_app(
+				ctx,
+				stack_pointer_func,
+				1,
+				[Z3_mk_int(ctx, (i + 1) as i32, int_sort)].as_ptr(),
+			);
+
+			let (pop_count, push_count) = stack_pop_push_count(&program[i]);
+			let pop_count = Z3_mk_int(ctx, pop_count as i32, int_sort);
+			let push_count = Z3_mk_int(ctx, push_count as i32, int_sort);
+
+			let new_counter = Z3_mk_add(
+				ctx,
+				3,
+				[
+					stack_counter_i,
+					Z3_mk_unary_minus(ctx, pop_count),
+					push_count,
+				]
+				.as_ptr(),
+			);
+			Z3_solver_assert(ctx, solver, Z3_mk_eq(ctx, stack_counter_ii, new_counter))
+		}
+	}
+}
+
+/// Number of items popped / pushed by the instruction
+fn stack_pop_push_count(i: &Instruction) -> (usize, usize) {
+	use Instruction::*;
+
+	match i {
+		I32Const(_) => (0, 1),
+		I32Add => (2, 1),
+		_ => unimplemented!(),
+	}
 }
 
 #[cfg(test)]
