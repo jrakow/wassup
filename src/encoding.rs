@@ -24,7 +24,7 @@ fn encode_init_conditions(ctx: &Context, solver: &Solver, program: &[Instruction
 
 	let stack_depth = 2;
 	let stack_vars: Vec<_> = (0..stack_depth)
-		.map(|i| ctx.r#const(&ctx.string_symbol(&format!("x{}", i)), &word_sort))
+		.map(|i| ctx.fresh_const("initial-stack", &word_sort))
 		.collect();
 
 	// declare stack function
