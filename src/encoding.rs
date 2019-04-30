@@ -6,6 +6,8 @@ struct Constants<'ctx> {
 	int_sort: Sort<'ctx>,
 	instruction_sort: Sort<'ctx>,
 	instruction_consts: Vec<FuncDecl<'ctx>>,
+	stack_pop_count_func: FuncDecl<'ctx>,
+	stack_push_count_func: FuncDecl<'ctx>,
 	initial_stack: Vec<Ast<'ctx>>,
 	stack_depth: usize,
 }
@@ -20,7 +22,11 @@ fn create_instruction<'ctx>(constants: &'ctx Constants, i: &Instruction) -> Ast<
 	}
 }
 
-fn create_constants(ctx: &Context, stack_depth: usize) -> Constants {
+fn create_constants<'ctx>(
+	ctx: &'ctx Context,
+	solver: &Solver,
+	stack_depth: usize,
+) -> Constants<'ctx> {
 	let word_sort = ctx.bv_sort(32);
 	let int_sort = ctx.int_sort();
 	let (instruction_sort, instruction_consts, _) = ctx.enumeration_sort(
@@ -31,11 +37,44 @@ fn create_constants(ctx: &Context, stack_depth: usize) -> Constants {
 		.map(|i| ctx.fresh_const("initial-stack", &word_sort))
 		.collect();
 
+	let stack_pop_count_func = ctx.func_decl(
+		&ctx.string_symbol("stack-pop-count"),
+		&[instruction_sort],
+		&int_sort,
+	);
+	solver.assert(
+		&stack_pop_count_func
+			.apply(&[instruction_consts[0].apply(&[])])
+			.eq(&ctx.int(1, &int_sort)),
+	);
+	solver.assert(
+		&stack_pop_count_func
+			.apply(&[instruction_consts[1].apply(&[])])
+			.eq(&ctx.int(0, &int_sort)),
+	);
+	let stack_push_count_func = ctx.func_decl(
+		&ctx.string_symbol("stack-push-count"),
+		&[instruction_sort],
+		&int_sort,
+	);
+	solver.assert(
+		&stack_push_count_func
+			.apply(&[instruction_consts[0].apply(&[])])
+			.eq(&ctx.int(1, &int_sort)),
+	);
+	solver.assert(
+		&stack_push_count_func
+			.apply(&[instruction_consts[1].apply(&[])])
+			.eq(&ctx.int(1, &int_sort)),
+	);
+
 	Constants {
 		word_sort,
 		int_sort,
 		instruction_sort,
 		instruction_consts,
+		stack_pop_count_func,
+		stack_push_count_func,
 		initial_stack,
 		stack_depth,
 	}
@@ -122,17 +161,6 @@ fn set_source_program(
 	}
 }
 
-/// Number of items popped / pushed by the instruction
-fn stack_pop_push_count(i: &Instruction) -> (usize, usize) {
-	use Instruction::*;
-
-	match i {
-		I32Const(_) => (0, 1),
-		I32Add => (2, 1),
-		_ => unimplemented!(),
-	}
-}
-
 fn gas_particle_cost(_: &Instruction) -> usize {
 	1
 }
@@ -155,13 +183,14 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = create_constants(&ctx, 2);
+		let constants = create_constants(&ctx, &solver, 2);
 		let state = create_state(&ctx, &constants, "", program.len());
 		set_initial_state(&ctx, &solver, &constants, &state);
 
 		set_source_program(&ctx, &solver, &constants, &state, program);
+		println!("{}", &solver);
 
-		solver.check();
+		assert!(solver.check());
 		let model = solver.model();
 		println!("{}", model);
 	}
