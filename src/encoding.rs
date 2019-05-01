@@ -107,7 +107,7 @@ fn create_state<'ctx>(
 
 	// declare stack pointer function
 	let stack_pointer_func = ctx.func_decl(
-		&ctx.string_symbol(&format!("{}stack_pointer", prefix)),
+		&ctx.string_symbol(&format!("{}stack-pointer", prefix)),
 		&[constants.int_sort],
 		&constants.int_sort,
 	);
