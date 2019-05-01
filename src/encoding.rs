@@ -34,38 +34,38 @@ fn create_constants<'ctx>(
 		&[&ctx.string_symbol("I32Const"), &ctx.string_symbol("I32Add")],
 	);
 	let initial_stack: Vec<_> = (0..stack_depth)
-		.map(|i| ctx.fresh_const("initial-stack", &word_sort))
+		.map(|i| ctx.fresh_const("initial-stack", word_sort))
 		.collect();
 
 	let stack_pop_count_func = ctx.func_decl(
 		&ctx.string_symbol("stack-pop-count"),
 		&[instruction_sort],
-		&int_sort,
+		int_sort,
 	);
 	solver.assert(
 		&stack_pop_count_func
 			.apply(&[instruction_consts[0].apply(&[])])
-			.eq(&ctx.int(1, &int_sort)),
+			.eq(&ctx.int(1, int_sort)),
 	);
 	solver.assert(
 		&stack_pop_count_func
 			.apply(&[instruction_consts[1].apply(&[])])
-			.eq(&ctx.int(0, &int_sort)),
+			.eq(&ctx.int(0, int_sort)),
 	);
 	let stack_push_count_func = ctx.func_decl(
 		&ctx.string_symbol("stack-push-count"),
 		&[instruction_sort],
-		&int_sort,
+		int_sort,
 	);
 	solver.assert(
 		&stack_push_count_func
 			.apply(&[instruction_consts[0].apply(&[])])
-			.eq(&ctx.int(1, &int_sort)),
+			.eq(&ctx.int(1, int_sort)),
 	);
 	solver.assert(
 		&stack_push_count_func
 			.apply(&[instruction_consts[1].apply(&[])])
-			.eq(&ctx.int(1, &int_sort)),
+			.eq(&ctx.int(1, int_sort)),
 	);
 
 	Constants {
@@ -102,21 +102,21 @@ fn create_state<'ctx>(
 			constants.int_sort, // instruction counter
 			constants.int_sort, // stack address
 		],
-		&constants.word_sort,
+		constants.word_sort,
 	);
 
 	// declare stack pointer function
 	let stack_pointer_func = ctx.func_decl(
 		&ctx.string_symbol(&format!("{}stack-pointer", prefix)),
 		&[constants.int_sort],
-		&constants.int_sort,
+		constants.int_sort,
 	);
 
 	// declare program function
 	let program_func = ctx.func_decl(
 		&ctx.string_symbol(&format!("{}program", prefix)),
 		&[constants.int_sort],
-		&constants.instruction_sort,
+		constants.instruction_sort,
 	);
 
 	State {
@@ -131,8 +131,8 @@ fn set_initial_state(ctx: &Context, solver: &Solver, constants: &Constants, stat
 	// set stack(0, i) == xs[i]
 	for (i, var) in constants.initial_stack.iter().enumerate() {
 		let lhs = state.stack_func.apply(&[
-			ctx.int(0, &constants.int_sort),
-			ctx.int(i, &constants.int_sort),
+			ctx.int(0, constants.int_sort),
+			ctx.int(i, constants.int_sort),
 		]);
 		solver.assert(&lhs.eq(var));
 	}
@@ -141,8 +141,8 @@ fn set_initial_state(ctx: &Context, solver: &Solver, constants: &Constants, stat
 	solver.assert(
 		&state
 			.stack_pointer_func
-			.apply(&[ctx.int(0, &constants.int_sort)])
-			.eq(&ctx.int(0, &constants.int_sort)),
+			.apply(&[ctx.int(0, constants.int_sort)])
+			.eq(&ctx.int(0, constants.int_sort)),
 	);
 }
 
@@ -155,7 +155,7 @@ fn set_source_program(
 ) {
 	// set program_func to program
 	for (index, instruction) in program.iter().enumerate() {
-		let index = ctx.int(index, &constants.int_sort);
+		let index = ctx.int(index, constants.int_sort);
 		let instruction = create_instruction(constants, instruction);
 		solver.assert(&state.program_func.apply(&[index]).eq(&instruction))
 	}
