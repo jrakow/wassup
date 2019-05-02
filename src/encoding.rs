@@ -2,6 +2,33 @@ use parity_wasm::elements::Instruction;
 use std::convert::TryInto;
 use wassup_z3::*;
 
+fn instruction_to_index(i: &Instruction) -> usize {
+	use Instruction::*;
+
+	match i {
+		I32Const(_) => 0,
+		I32Add => 1,
+		_ => unimplemented!(),
+	}
+}
+
+fn stack_pop_push_count(i: &Instruction) -> (usize, usize) {
+	use Instruction::*;
+
+	match i {
+		I32Const(_) => (0, 1),
+		I32Add => (2, 1),
+		_ => unimplemented!(),
+	}
+}
+
+fn iter_intructions() -> impl Iterator<Item = &'static Instruction> {
+	use Instruction::*;
+
+	static INSTRUCTIONS: &[Instruction] = &[I32Const(0), I32Add];
+	INSTRUCTIONS.iter()
+}
+
 struct Constants<'ctx, 'solver> {
 	ctx: &'ctx Context,
 	solver: &'solver Solver<'ctx>,
@@ -64,10 +91,12 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 				.stack_push_count_func
 				.apply(&[constants.instruction(i)])
 		};
-		solver.assert(&pop_count(&I32Const(0)).eq(&int(0)));
-		solver.assert(&push_count(&I32Const(0)).eq(&int(1)));
-		solver.assert(&pop_count(&I32Add).eq(&int(2)));
-		solver.assert(&push_count(&I32Add).eq(&int(1)));
+
+		for i in iter_intructions() {
+			let (pops, pushs) = stack_pop_push_count(i);
+			solver.assert(&pop_count(i).eq(&int(pops)));
+			solver.assert(&push_count(i).eq(&int(pushs)));
+		}
 
 		constants
 	}
@@ -113,13 +142,7 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 	}
 
 	fn instruction(&'ctx self, i: &Instruction) -> Ast<'ctx> {
-		use Instruction::*;
-
-		match i {
-			I32Const(_) => self.instruction_consts[0].apply(&[]),
-			I32Add => self.instruction_consts[1].apply(&[]),
-			_ => unimplemented!(),
-		}
+		self.instruction_consts[instruction_to_index(i)].apply(&[])
 	}
 }
 
@@ -172,7 +195,7 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn stack_pop_push_count() {
+	fn test_stack_pop_push_count() {
 		let ctx = {
 			let cfg = Config::default();
 			Context::with_config(&cfg)
@@ -189,6 +212,15 @@ mod tests {
 			let i: i64 = (&ast).try_into().unwrap();
 			i
 		};
+
+		for i in iter_intructions() {
+			let (pops, pushs) = stack_pop_push_count(i);
+			assert_eq!(eval_count(&constants.stack_pop_count_func, i), pops as i64);
+			assert_eq!(
+				eval_count(&constants.stack_push_count_func, i),
+				pushs as i64
+			);
+		}
 
 		assert_eq!(
 			eval_count(&constants.stack_pop_count_func, &Instruction::I32Add),
