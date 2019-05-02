@@ -13,13 +13,15 @@ struct Constants<'ctx> {
 	stack_depth: usize,
 }
 
-fn create_instruction<'ctx>(constants: &'ctx Constants, i: &Instruction) -> Ast<'ctx> {
-	use Instruction::*;
+impl<'ctx> Constants<'ctx> {
+	fn instruction(&'ctx self, i: &Instruction) -> Ast<'ctx> {
+		use Instruction::*;
 
-	match i {
-		I32Const(_) => constants.instruction_consts[0].apply(&[]),
-		I32Add => constants.instruction_consts[1].apply(&[]),
-		_ => unimplemented!(),
+		match i {
+			I32Const(_) => self.instruction_consts[0].apply(&[]),
+			I32Add => self.instruction_consts[1].apply(&[]),
+			_ => unimplemented!(),
+		}
 	}
 }
 
@@ -28,6 +30,8 @@ fn create_constants<'ctx>(
 	solver: &Solver,
 	stack_depth: usize,
 ) -> Constants<'ctx> {
+	use Instruction::*;
+
 	let word_sort = ctx.bv_sort(32);
 	let int_sort = ctx.int_sort();
 	let (instruction_sort, instruction_consts, _) = ctx.enumeration_sort(
@@ -43,33 +47,13 @@ fn create_constants<'ctx>(
 		&[instruction_sort],
 		int_sort,
 	);
-	solver.assert(
-		&stack_pop_count_func
-			.apply(&[instruction_consts[0].apply(&[])])
-			.eq(&ctx.int(1, int_sort)),
-	);
-	solver.assert(
-		&stack_pop_count_func
-			.apply(&[instruction_consts[1].apply(&[])])
-			.eq(&ctx.int(0, int_sort)),
-	);
 	let stack_push_count_func = ctx.func_decl(
 		&ctx.string_symbol("stack-push-count"),
 		&[instruction_sort],
 		int_sort,
 	);
-	solver.assert(
-		&stack_push_count_func
-			.apply(&[instruction_consts[0].apply(&[])])
-			.eq(&ctx.int(1, int_sort)),
-	);
-	solver.assert(
-		&stack_push_count_func
-			.apply(&[instruction_consts[1].apply(&[])])
-			.eq(&ctx.int(1, int_sort)),
-	);
 
-	Constants {
+	let constants = Constants {
 		word_sort,
 		int_sort,
 		instruction_sort,
@@ -78,7 +62,25 @@ fn create_constants<'ctx>(
 		stack_push_count_func,
 		initial_stack,
 		stack_depth,
-	}
+	};
+
+	let int = |i| ctx.int(i, int_sort);
+	let pop_count = |i| {
+		constants
+			.stack_pop_count_func
+			.apply(&[constants.instruction(i)])
+	};
+	let push_count = |i| {
+		constants
+			.stack_push_count_func
+			.apply(&[constants.instruction(i)])
+	};
+	solver.assert(&pop_count(&I32Const(0)).eq(&int(0)));
+	solver.assert(&push_count(&I32Const(0)).eq(&int(1)));
+	solver.assert(&pop_count(&I32Add).eq(&int(2)));
+	solver.assert(&push_count(&I32Add).eq(&int(1)));
+
+	constants
 }
 
 struct State<'ctx> {
@@ -157,7 +159,7 @@ fn set_source_program(
 	// set program_func to program
 	for (index, instruction) in program.iter().enumerate() {
 		let index = ctx.int(index, constants.int_sort);
-		let instruction = create_instruction(constants, instruction);
+		let instruction = constants.instruction(instruction);
 		solver.assert(&state.program_func.apply(&[index]).eq(&instruction))
 	}
 }
