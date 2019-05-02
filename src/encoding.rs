@@ -1,4 +1,5 @@
 use parity_wasm::elements::Instruction;
+use std::convert::TryInto;
 use wassup_z3::*;
 
 struct Constants<'ctx> {
@@ -168,6 +169,43 @@ fn gas_particle_cost(_: &Instruction) -> usize {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn stack_pop_push_count() {
+		let ctx = {
+			let cfg = Config::default();
+			Context::with_config(&cfg)
+		};
+		let solver = Solver::with_context(&ctx);
+		let constants = create_constants(&ctx, &solver, 0);
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let eval_count = |func: &FuncDecl, i| {
+			let ast = func.apply(&[constants.instruction(i)]);
+			let ast = model.eval(&ast);
+			let i: i64 = (&ast).try_into().unwrap();
+			i
+		};
+
+		assert_eq!(
+			eval_count(&constants.stack_pop_count_func, &Instruction::I32Add),
+			2
+		);
+		assert_eq!(
+			eval_count(&constants.stack_push_count_func, &Instruction::I32Add),
+			1
+		);
+		assert_eq!(
+			eval_count(&constants.stack_pop_count_func, &Instruction::I32Const(0)),
+			0
+		);
+		assert_eq!(
+			eval_count(&constants.stack_push_count_func, &Instruction::I32Const(0)),
+			1
+		);
+	}
 
 	#[test]
 	fn simple() {
