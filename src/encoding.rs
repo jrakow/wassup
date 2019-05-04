@@ -36,6 +36,7 @@ struct Constants<'ctx, 'solver> {
 	int_sort: Sort<'ctx>,
 	instruction_sort: Sort<'ctx>,
 	instruction_consts: Vec<FuncDecl<'ctx>>,
+	instruction_testers: Vec<FuncDecl<'ctx>>,
 	stack_pop_count_func: FuncDecl<'ctx>,
 	stack_push_count_func: FuncDecl<'ctx>,
 	initial_stack: Vec<Ast<'ctx>>,
@@ -48,7 +49,7 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 
 		let word_sort = ctx.bv_sort(32);
 		let int_sort = ctx.int_sort();
-		let (instruction_sort, instruction_consts, _) = ctx.enumeration_sort(
+		let (instruction_sort, instruction_consts, instruction_testers) = ctx.enumeration_sort(
 			&ctx.string_symbol("instruction-sort"),
 			&[&ctx.string_symbol("I32Const"), &ctx.string_symbol("I32Add")],
 		);
@@ -74,6 +75,7 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			int_sort,
 			instruction_sort,
 			instruction_consts,
+			instruction_testers,
 			stack_pop_count_func,
 			stack_push_count_func,
 			initial_stack,
@@ -257,6 +259,15 @@ mod tests {
 
 		assert!(constants.solver.check());
 		let model = constants.solver.model();
+
+		for (i, instr) in program.iter().enumerate() {
+			let i_enc = ctx.int(i, ctx.int_sort());
+			let instr_enc = state.program_func.apply(&[i_enc]);
+			let is_equal = constants.instruction_testers[instruction_to_index(instr)]
+				.apply(&[instr_enc.clone()]);
+			let b: bool = (&model.eval(&is_equal)).try_into().unwrap();
+			assert!(b);
+		}
 	}
 
 	#[test]
