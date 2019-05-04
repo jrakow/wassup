@@ -189,7 +189,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		}
 	}
 
-	fn stack_pointer_transition_condition(&self) -> Ast<'ctx> {
+	fn stack_pointer_transition_condition(&self) -> Ast {
 		let mut conditions = vec![];
 
 		for i in 0..self.program_length {
