@@ -186,6 +186,31 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				.assert(&self.program_func.apply(&[index]).eq(&instruction))
 		}
 	}
+
+	fn stack_pointer_transition_condition(&self) -> Ast<'ctx> {
+		let mut conditions = vec![];
+
+		for i in 0..self.program_length {
+			let next_i = self.constants.ctx.int(i + 1, self.constants.int_sort);
+			let i = self.constants.ctx.int(i, self.constants.int_sort);
+
+			// encode stack_pointer change
+			let stack_pointer = self.stack_pointer_func.apply(&[i.clone()]);
+			let stack_pointer_next = self.stack_pointer_func.apply(&[next_i]);
+
+			let instruction = self.program_func.apply(&[i]);
+			let pop_count = self
+				.constants
+				.stack_pop_count_func
+				.apply(&[instruction.clone()]);
+			let push_count = self.constants.stack_push_count_func.apply(&[instruction]);
+
+			let new_pointer = &(&stack_pointer + &push_count) - &pop_count;
+			conditions.push(stack_pointer_next.eq(&new_pointer));
+		}
+
+		self.constants.ctx.and(&conditions[..])
+	}
 }
 
 fn gas_particle_cost(_: &Instruction) -> usize {
@@ -293,5 +318,30 @@ mod tests {
 			.apply(&[ctx.int(0, ctx.int_sort())]);
 		let stack_pointer_int: i64 = (&model.eval(&stack_pointer)).try_into().unwrap();
 		assert_eq!(stack_pointer_int, 0);
+	}
+
+	#[test]
+	fn stack_pointer_transition() {
+		let ctx = Context::with_config(&Config::default());
+		let solver = Solver::with_context(&ctx);
+
+		let program = &[Instruction::I32Const(1)];
+
+		let constants = Constants::new(&ctx, &solver, 2);
+		let state = constants.new_state("", program.len());
+		state.set_source_program(program);
+		solver.assert(&state.stack_pointer_transition_condition());
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let stack_pointer = |index| -> i64 {
+			let ast = state
+				.stack_pointer_func
+				.apply(&[ctx.int(index, ctx.int_sort())]);
+			(&model.eval(&ast)).try_into().unwrap()
+		};
+		assert_eq!(stack_pointer(0), 0);
+		assert_eq!(stack_pointer(1), 1);
 	}
 }
