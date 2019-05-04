@@ -8,13 +8,14 @@ use z3_sys::*;
 fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruction]) {
 	let word_sort = unsafe { Z3_mk_bv_sort(ctx, 32) };
 	let int_sort = unsafe { Z3_mk_int_sort(ctx) };
-	let sort_name = unsafe {
-		Z3_mk_string_symbol(ctx, CString::new("instruction_sort").unwrap().as_ptr())
+	let sort_name =
+		unsafe { Z3_mk_string_symbol(ctx, CString::new("instruction_sort").unwrap().as_ptr()) };
+	let instructions = unsafe {
+		&[
+			Z3_mk_string_symbol(ctx, CString::new("I32Const").unwrap().as_ptr()),
+			Z3_mk_string_symbol(ctx, CString::new("I32Add").unwrap().as_ptr()),
+		]
 	};
-	let instructions = unsafe {&[
-		Z3_mk_string_symbol(ctx, CString::new("I32Const").unwrap().as_ptr()),
-		Z3_mk_string_symbol(ctx, CString::new("I32Add").unwrap().as_ptr()),
-	]};
 	let instruction_consts = &mut [null_mut(), null_mut()];
 	let instruction_testers = &mut [null_mut(), null_mut()];
 	assert_eq!(instructions.len(), instruction_consts.len());
@@ -23,7 +24,7 @@ fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruc
 		Z3_mk_enumeration_sort(
 			ctx,
 			sort_name,
-			instructions.len() as  _,
+			instructions.len() as _,
 			instructions.as_ptr(),
 			instruction_consts.as_mut_ptr(),
 			instruction_testers.as_mut_ptr(),
@@ -77,8 +78,10 @@ fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruc
 			.collect();
 		let lhs = unsafe { Z3_mk_app(ctx, stack_func, args.len() as _, args.as_ptr()) };
 		let rhs = stack_vars[i];
-		unsafe { Z3_solver_assert(ctx, solver, Z3_mk_eq(ctx, lhs, rhs)); }
-	};
+		unsafe {
+			Z3_solver_assert(ctx, solver, Z3_mk_eq(ctx, lhs, rhs));
+		}
+	}
 
 	// declare stack pointer function
 	let stack_pointer_name =
@@ -98,11 +101,15 @@ fn encode_init_conditions(ctx: Z3_context, solver: Z3_solver, program: &[Instruc
 	let stack_pointer_init_condition = unsafe {
 		let zero = Z3_mk_int(ctx, 0, int_sort);
 		let args = &[zero];
-		Z3_solver_assert(ctx, solver, Z3_mk_eq(
+		Z3_solver_assert(
 			ctx,
-			Z3_mk_app(ctx, stack_pointer_func, args.len() as _, args.as_ptr()),
-			zero,
-		))
+			solver,
+			Z3_mk_eq(
+				ctx,
+				Z3_mk_app(ctx, stack_pointer_func, args.len() as _, args.as_ptr()),
+				zero,
+			),
+		)
 	};
 
 	// declare program function
@@ -141,7 +148,7 @@ mod tests {
 			Z3_solver_inc_ref(ctx, solver);
 			solver
 		};
-		
+
 		encode_init_conditions(
 			ctx,
 			solver,
