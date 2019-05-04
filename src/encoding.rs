@@ -257,8 +257,6 @@ mod tests {
 
 		assert!(constants.solver.check());
 		let model = constants.solver.model();
-
-		println!("{}", &solver);
 	}
 
 	#[test]
@@ -276,10 +274,7 @@ mod tests {
 		let state = constants.new_state("", program.len());
 		state.set_source_program(program);
 
-		println!("{}", &solver);
-
 		assert!(solver.check());
 		let model = solver.model();
-		println!("{}", model);
 	}
 }
