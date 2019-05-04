@@ -287,5 +287,11 @@ mod tests {
 
 		assert!(solver.check());
 		let model = solver.model();
+
+		let stack_pointer = state
+			.stack_pointer_func
+			.apply(&[ctx.int(0, ctx.int_sort())]);
+		let stack_pointer_int: i64 = (&model.eval(&stack_pointer)).try_into().unwrap();
+		assert_eq!(stack_pointer_int, 0);
 	}
 }
