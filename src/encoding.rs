@@ -83,21 +83,19 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		};
 
 		let int = |i| ctx.int(i, int_sort);
-		let pop_count = |i| {
-			constants
-				.stack_pop_count_func
-				.apply(&[constants.instruction(i)])
-		};
-		let push_count = |i| {
-			constants
-				.stack_push_count_func
-				.apply(&[constants.instruction(i)])
-		};
 
 		for i in iter_intructions() {
 			let (pops, pushs) = stack_pop_push_count(i);
-			solver.assert(&pop_count(i).eq(&int(pops)));
-			solver.assert(&push_count(i).eq(&int(pushs)));
+			solver.assert(
+				&constants
+					.stack_pop_count(constants.instruction(i))
+					.eq(&int(pops)),
+			);
+			solver.assert(
+				&constants
+					.stack_push_count(constants.instruction(i))
+					.eq(&int(pushs)),
+			);
 		}
 
 		constants
@@ -143,8 +141,20 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		state
 	}
 
-	fn instruction(&'ctx self, i: &Instruction) -> Ast<'ctx> {
+	fn instruction(&'ctx self, i: &Instruction) -> Ast {
 		self.instruction_consts[instruction_to_index(i)].apply(&[])
+	}
+
+	fn stack_pop_count(&self, instr: Ast) -> Ast {
+		self.stack_pop_count_func.apply(&[instr])
+	}
+
+	fn stack_push_count(&self, instr: Ast) -> Ast {
+		self.stack_push_count_func.apply(&[instr])
+	}
+
+	fn int(&self, i: usize) -> Ast {
+		self.ctx.int(i, self.ctx.int_sort())
 	}
 }
 
@@ -160,30 +170,22 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn set_initial(&self) {
 		// set stack(0, i) == xs[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
-			let lhs = self.stack_func.apply(&[
-				self.constants.ctx.int(0, self.constants.int_sort),
-				self.constants.ctx.int(i, self.constants.int_sort),
-			]);
-			self.constants.solver.assert(&lhs.eq(var));
+			self.constants.solver.assert(&self.stack(0, i).eq(var));
 		}
 
 		// set stack_counter(0) = 0
-		self.constants.solver.assert(
-			&self
-				.stack_pointer_func
-				.apply(&[self.constants.ctx.int(0, self.constants.int_sort)])
-				.eq(&self.constants.ctx.int(0, self.constants.int_sort)),
-		);
+		self.constants
+			.solver
+			.assert(&self.stack_pointer(0).eq(&self.constants.int(0)));
 	}
 
 	fn set_source_program(&self, program: &[Instruction]) {
 		// set program_func to program
 		for (index, instruction) in program.iter().enumerate() {
-			let index = self.constants.ctx.int(index, self.constants.int_sort);
 			let instruction = self.constants.instruction(instruction);
 			self.constants
 				.solver
-				.assert(&self.program_func.apply(&[index]).eq(&instruction))
+				.assert(&self.program(index).eq(&instruction))
 		}
 	}
 
@@ -191,25 +193,32 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let mut conditions = vec![];
 
 		for i in 0..self.program_length {
-			let next_i = self.constants.ctx.int(i + 1, self.constants.int_sort);
-			let i = self.constants.ctx.int(i, self.constants.int_sort);
-
 			// encode stack_pointer change
-			let stack_pointer = self.stack_pointer_func.apply(&[i.clone()]);
-			let stack_pointer_next = self.stack_pointer_func.apply(&[next_i]);
+			let stack_pointer = self.stack_pointer(i);
+			let stack_pointer_next = self.stack_pointer(i + 1);
 
-			let instruction = self.program_func.apply(&[i]);
-			let pop_count = self
-				.constants
-				.stack_pop_count_func
-				.apply(&[instruction.clone()]);
-			let push_count = self.constants.stack_push_count_func.apply(&[instruction]);
+			let instruction = self.program(i);
+			let pop_count = self.constants.stack_pop_count(instruction.clone());
+			let push_count = self.constants.stack_push_count(instruction);
 
 			let new_pointer = &(&stack_pointer + &push_count) - &pop_count;
 			conditions.push(stack_pointer_next.eq(&new_pointer));
 		}
 
 		self.constants.ctx.and(&conditions[..])
+	}
+
+	fn stack_pointer(&self, index: usize) -> Ast {
+		self.stack_pointer_func.apply(&[self.constants.int(index)])
+	}
+
+	fn stack(&self, pc: usize, index: usize) -> Ast {
+		self.stack_func
+			.apply(&[self.constants.int(pc), self.constants.int(index)])
+	}
+
+	fn program(&self, pc: usize) -> Ast {
+		self.program_func.apply(&[self.constants.int(pc)])
 	}
 }
 
@@ -233,36 +242,38 @@ mod tests {
 		assert!(constants.solver.check());
 		let model = constants.solver.model();
 
-		let eval_count = |func: &FuncDecl, i| {
-			let ast = func.apply(&[constants.instruction(i)]);
+		let eval = |ast: &Ast| -> i64 {
 			let ast = model.eval(&ast);
-			let i: i64 = (&ast).try_into().unwrap();
-			i
+			(&ast).try_into().unwrap()
 		};
 
 		for i in iter_intructions() {
 			let (pops, pushs) = stack_pop_push_count(i);
-			assert_eq!(eval_count(&constants.stack_pop_count_func, i), pops as i64);
+			let (pops, pushs) = (pops as i64, pushs as i64);
 			assert_eq!(
-				eval_count(&constants.stack_push_count_func, i),
-				pushs as i64
+				eval(&constants.stack_pop_count(constants.instruction(i))),
+				pops
+			);
+			assert_eq!(
+				eval(&constants.stack_push_count(constants.instruction(i))),
+				pushs
 			);
 		}
 
 		assert_eq!(
-			eval_count(&constants.stack_pop_count_func, &Instruction::I32Add),
+			eval(&constants.stack_pop_count(constants.instruction(&Instruction::I32Add))),
 			2
 		);
 		assert_eq!(
-			eval_count(&constants.stack_push_count_func, &Instruction::I32Add),
+			eval(&constants.stack_push_count(constants.instruction(&Instruction::I32Add))),
 			1
 		);
 		assert_eq!(
-			eval_count(&constants.stack_pop_count_func, &Instruction::I32Const(0)),
+			eval(&constants.stack_pop_count(constants.instruction(&Instruction::I32Const(0)))),
 			0
 		);
 		assert_eq!(
-			eval_count(&constants.stack_push_count_func, &Instruction::I32Const(0)),
+			eval(&constants.stack_push_count(constants.instruction(&Instruction::I32Const(0)))),
 			1
 		);
 	}
@@ -286,8 +297,7 @@ mod tests {
 		let model = constants.solver.model();
 
 		for (i, instr) in program.iter().enumerate() {
-			let i_enc = ctx.int(i, ctx.int_sort());
-			let instr_enc = state.program_func.apply(&[i_enc]);
+			let instr_enc = state.program(i);
 			let is_equal = constants.instruction_testers[instruction_to_index(instr)]
 				.apply(&[instr_enc.clone()]);
 			let b: bool = (&model.eval(&is_equal)).try_into().unwrap();
@@ -313,9 +323,7 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.model();
 
-		let stack_pointer = state
-			.stack_pointer_func
-			.apply(&[ctx.int(0, ctx.int_sort())]);
+		let stack_pointer = state.stack_pointer(0);
 		let stack_pointer_int: i64 = (&model.eval(&stack_pointer)).try_into().unwrap();
 		assert_eq!(stack_pointer_int, 0);
 	}
@@ -335,13 +343,11 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.model();
 
-		let stack_pointer = |index| -> i64 {
-			let ast = state
-				.stack_pointer_func
-				.apply(&[ctx.int(index, ctx.int_sort())]);
-			(&model.eval(&ast)).try_into().unwrap()
+		let eval = |ast| -> i64 {
+			let evaled = model.eval(&ast);
+			(&evaled).try_into().unwrap()
 		};
-		assert_eq!(stack_pointer(0), 0);
-		assert_eq!(stack_pointer(1), 1);
+		assert_eq!(eval(state.stack_pointer(0)), 0);
+		assert_eq!(eval(state.stack_pointer(1)), 1);
 	}
 }
