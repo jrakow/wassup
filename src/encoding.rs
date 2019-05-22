@@ -32,6 +32,7 @@ fn iter_intructions() -> impl Iterator<Item = &'static Instruction> {
 struct Constants<'ctx, 'solver> {
 	ctx: &'ctx Context,
 	solver: &'solver Solver<'ctx>,
+
 	word_sort: Sort<'ctx>,
 	int_sort: Sort<'ctx>,
 	instruction_sort: Sort<'ctx>,
@@ -131,6 +132,8 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		);
 
 		let state = State {
+			ctx: self.ctx,
+			solver: self.solver,
 			constants: self,
 			stack_func,
 			stack_pointer_func,
@@ -159,7 +162,10 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 }
 
 struct State<'ctx, 'solver, 'constants> {
+	ctx: &'ctx Context,
+	solver: &'solver Solver<'ctx>,
 	constants: &'constants Constants<'ctx, 'solver>,
+
 	stack_func: FuncDecl<'ctx>,
 	stack_pointer_func: FuncDecl<'ctx>,
 	program_func: FuncDecl<'ctx>,
@@ -170,14 +176,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn set_initial(&self) {
 		// set stack(0, i) == xs[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
-			self.constants
-				.solver
-				.assert(self.stack(0, i).eq(var.clone()));
+			self.solver.assert(self.stack(0, i).eq(var.clone()));
 		}
 
 		// set stack_counter(0) = 0
-		self.constants
-			.solver
+		self.solver
 			.assert(self.stack_pointer(0).eq(self.constants.int(0)));
 	}
 
@@ -185,9 +188,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// set program_func to program
 		for (index, instruction) in program.iter().enumerate() {
 			let instruction = self.constants.instruction(instruction);
-			self.constants
-				.solver
-				.assert(self.program(index).eq(instruction))
+			self.solver.assert(self.program(index).eq(instruction))
 		}
 	}
 
@@ -207,7 +208,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			conditions.push(stack_pointer_next.eq(new_pointer));
 		}
 
-		self.constants.ctx.and(&conditions[..])
+		self.ctx.and(&conditions[..])
 	}
 
 	fn stack_pointer(&self, index: usize) -> Ast {
