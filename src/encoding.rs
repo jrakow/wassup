@@ -102,48 +102,6 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		constants
 	}
 
-	fn new_state<'constants>(
-		&'constants self,
-		prefix: &str,
-		program_length: usize,
-	) -> State<'ctx, 'solver, 'constants> {
-		// declare stack function
-		let stack_func = self.ctx.func_decl(
-			self.ctx.string_symbol(&format!("{}stack", prefix)),
-			&[
-				self.int_sort, // instruction counter
-				self.int_sort, // stack address
-			],
-			self.word_sort,
-		);
-
-		// declare stack pointer function
-		let stack_pointer_func = self.ctx.func_decl(
-			self.ctx.string_symbol(&format!("{}stack-pointer", prefix)),
-			&[self.int_sort],
-			self.int_sort,
-		);
-
-		// declare program function
-		let program_func = self.ctx.func_decl(
-			self.ctx.string_symbol(&format!("{}program", prefix)),
-			&[self.int_sort],
-			self.instruction_sort,
-		);
-
-		let state = State {
-			ctx: self.ctx,
-			solver: self.solver,
-			constants: self,
-			stack_func,
-			stack_pointer_func,
-			program_func,
-			program_length,
-		};
-		state.set_initial();
-		state
-	}
-
 	fn instruction(&'ctx self, i: &Instruction) -> Ast {
 		self.instruction_consts[instruction_to_index(i)].apply(&[])
 	}
@@ -173,6 +131,50 @@ struct State<'ctx, 'solver, 'constants> {
 }
 
 impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
+	fn new(
+		ctx: &'ctx Context,
+		solver: &'solver Solver<'ctx>,
+		constants: &'constants Constants<'ctx, 'solver>,
+		prefix: &str,
+		program_length: usize,
+	) -> Self {
+		// declare stack function
+		let stack_func = ctx.func_decl(
+			ctx.string_symbol(&format!("{}stack", prefix)),
+			&[
+				constants.int_sort, // instruction counter
+				constants.int_sort, // stack address
+			],
+			constants.word_sort,
+		);
+
+		// declare stack pointer function
+		let stack_pointer_func = ctx.func_decl(
+			ctx.string_symbol(&format!("{}stack-pointer", prefix)),
+			&[constants.int_sort],
+			constants.int_sort,
+		);
+
+		// declare program function
+		let program_func = ctx.func_decl(
+			ctx.string_symbol(&format!("{}program", prefix)),
+			&[constants.int_sort],
+			constants.instruction_sort,
+		);
+
+		let state = State {
+			ctx,
+			solver,
+			constants,
+			stack_func,
+			stack_pointer_func,
+			program_func,
+			program_length,
+		};
+		state.set_initial();
+		state
+	}
+
 	fn set_initial(&self) {
 		// set stack(0, i) == xs[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
@@ -293,7 +295,7 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, 2);
-		let state = constants.new_state("", program.len());
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
 		state.set_source_program(program);
 
 		assert!(constants.solver.check());
@@ -320,7 +322,7 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, 2);
-		let state = constants.new_state("", program.len());
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
 		state.set_source_program(program);
 
 		assert!(solver.check());
@@ -339,7 +341,7 @@ mod tests {
 		let program = &[Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, 2);
-		let state = constants.new_state("", program.len());
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
 		state.set_source_program(program);
 		solver.assert(state.stack_pointer_transition_condition());
 
