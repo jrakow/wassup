@@ -8,6 +8,7 @@ fn instruction_to_index(i: &Instruction) -> usize {
 	match i {
 		I32Const(_) => 0,
 		I32Add => 1,
+		Nop => 2,
 		_ => unimplemented!(),
 	}
 }
@@ -18,6 +19,7 @@ fn stack_pop_push_count(i: &Instruction) -> (isize, isize) {
 	match i {
 		I32Const(_) => (0, 1),
 		I32Add => (2, 1),
+		Nop => (0, 0),
 		_ => unimplemented!(),
 	}
 }
@@ -25,7 +27,7 @@ fn stack_pop_push_count(i: &Instruction) -> (isize, isize) {
 fn iter_intructions() -> impl Iterator<Item = &'static Instruction> {
 	use Instruction::*;
 
-	static INSTRUCTIONS: &[Instruction] = &[I32Const(0), I32Add];
+	static INSTRUCTIONS: &[Instruction] = &[I32Const(0), I32Add, Nop];
 	INSTRUCTIONS.iter()
 }
 
@@ -63,7 +65,11 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		let int_sort = ctx.int_sort();
 		let (instruction_sort, instruction_consts, instruction_testers) = ctx.enumeration_sort(
 			ctx.string_symbol("instruction-sort"),
-			&[ctx.string_symbol("I32Const"), ctx.string_symbol("I32Add")],
+			&[
+				ctx.string_symbol("I32Const"),
+				ctx.string_symbol("I32Add"),
+				ctx.string_symbol("Nop"),
+			],
 		);
 		let initial_stack: Vec<_> = (0..stack_depth)
 			.map(|i| ctx.fresh_const("initial-stack", word_sort))
@@ -312,6 +318,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 			// encode instruction effect
 			let new_stack_pointer = self.stack_pointer(pc + 1);
+
+			// instr == Nop
+
 			// instr == Add implies stack(pc + 1, new_stack_pointer) == stack(pc, stack_pointer) + stack(pc, stack_pointer - 1)
 			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Add));
 
@@ -461,6 +470,7 @@ mod tests {
 
 		let program = &[
 			Instruction::I32Const(1),
+			Instruction::Nop,
 			Instruction::I32Const(2),
 			Instruction::I32Add,
 		];
@@ -596,6 +606,7 @@ mod tests {
 
 		let program = &[
 			Instruction::I32Const(1),
+			Instruction::Nop,
 			Instruction::I32Const(2),
 			Instruction::I32Add,
 		];
@@ -622,7 +633,8 @@ mod tests {
 		};
 		assert_eq!(eval_bv(state.stack(1, constants.int(1))), 1);
 		assert_eq!(eval_bv(state.stack(2, constants.int(1))), 1);
-		assert_eq!(eval_bv(state.stack(2, constants.int(2))), 2);
-		assert_eq!(eval_bv(state.stack(3, constants.int(1))), 3);
+		assert_eq!(eval_bv(state.stack(3, constants.int(1))), 1);
+		assert_eq!(eval_bv(state.stack(3, constants.int(2))), 2);
+		assert_eq!(eval_bv(state.stack(4, constants.int(1))), 3);
 	}
 }
