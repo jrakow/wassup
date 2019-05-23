@@ -121,6 +121,10 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 	fn uint(&self, i: usize) -> Ast {
 		self.ctx.uint(i, self.ctx.int_sort())
 	}
+
+	fn int2word(&self, i: Ast) -> Ast {
+		self.ctx.int2bv(32, i)
+	}
 }
 
 struct State<'ctx, 'solver, 'constants> {
@@ -129,10 +133,13 @@ struct State<'ctx, 'solver, 'constants> {
 	constants: &'constants Constants<'ctx, 'solver>,
 
 	prefix: String,
+
 	stack_func: FuncDecl<'ctx>,
 	stack_pointer_func: FuncDecl<'ctx>,
 	program_func: FuncDecl<'ctx>,
 	program_length: usize,
+	consts_func: FuncDecl<'ctx>,
+
 	transition_func: FuncDecl<'ctx>,
 	transition_stack_pointer_func: FuncDecl<'ctx>,
 	transition_stack_func: FuncDecl<'ctx>,
@@ -161,6 +168,13 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			ctx.string_symbol(&format!("{}stack-pointer", prefix)),
 			&[constants.int_sort],
 			constants.int_sort,
+		);
+
+		// declare consts function
+		let consts_func = ctx.func_decl(
+			ctx.string_symbol(&format!("{}consts", prefix)),
+			&[constants.int_sort],
+			constants.word_sort,
 		);
 
 		// declare program function
@@ -197,6 +211,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			stack_pointer_func,
 			program_func,
 			program_length,
+			consts_func,
 			transition_func,
 			transition_stack_pointer_func,
 			transition_stack_func,
@@ -222,9 +237,17 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn set_source_program(&self, program: &[Instruction]) {
 		// set program_func to program
-		for (index, instruction) in program.iter().enumerate() {
+		for (pc, instruction) in program.iter().enumerate() {
+			if let Instruction::I32Const(i) = instruction {
+				let i = self
+					.constants
+					.int2word(self.constants.int((*i).try_into().unwrap()));
+				self.solver.assert(self.consts(pc).eq(i));
+			}
+
 			let instruction = self.constants.instruction(instruction);
-			self.solver.assert(self.program(index).eq(instruction))
+
+			self.solver.assert(self.program(pc).eq(instruction))
 		}
 	}
 
@@ -270,6 +293,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn program(&self, pc: usize) -> Ast {
 		self.program_func.apply(&[self.constants.uint(pc)])
+	}
+
+	fn consts(&self, pc: usize) -> Ast {
+		self.consts_func.apply(&[self.constants.uint(pc)])
 	}
 }
 
@@ -409,5 +436,27 @@ mod tests {
 		assert_eq!(eval(state.stack_pointer(1)), 1);
 		assert_eq!(eval(state.stack_pointer(2)), 2);
 		assert_eq!(eval(state.stack_pointer(3)), 1);
+	}
+
+	#[test]
+	fn consts() {
+		let ctx = Context::with_config(&Config::default());
+		let solver = Solver::with_context(&ctx);
+
+		let program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
+
+		let constants = Constants::new(&ctx, &solver, 2);
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		state.set_source_program(program);
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let eval = |ast| -> i64 {
+			let evaled = model.eval(ast);
+			evaled.try_into().unwrap()
+		};
+		assert_eq!(eval(state.consts(0)), 1);
+		assert_eq!(eval(state.consts(1)), 2);
 	}
 }
