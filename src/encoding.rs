@@ -600,7 +600,7 @@ mod tests {
 	}
 
 	#[test]
-	fn transition_add() {
+	fn transition_add_consts() {
 		let ctx = Context::with_config(&Config::default());
 		let solver = Solver::with_context(&ctx);
 
@@ -636,5 +636,39 @@ mod tests {
 		assert_eq!(eval_bv(state.stack(3, constants.int(1))), 1);
 		assert_eq!(eval_bv(state.stack(3, constants.int(2))), 2);
 		assert_eq!(eval_bv(state.stack(4, constants.int(1))), 3);
+	}
+
+	#[test]
+	fn transition_add() {
+		let ctx = Context::with_config(&Config::default());
+		let solver = Solver::with_context(&ctx);
+
+		let program = &[Instruction::I32Add];
+
+		let constants = Constants::new(&ctx, &solver, 2);
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		state.set_source_program(program);
+
+		for i in 0..program.len() {
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
+		}
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let eval_int = |ast| -> i64 {
+			let evaled = model.eval(ast);
+			evaled.try_into().unwrap()
+		};
+
+		let eval_bv = |ast| -> i64 {
+			let evaled = model.eval(ctx.bv2int(ast));
+			evaled.try_into().unwrap()
+		};
+		let sum = ctx.bvadd(
+			constants.initial_stack[0].clone(),
+			constants.initial_stack[1].clone(),
+		);
+		assert_eq!(eval_bv(state.stack(1, constants.int(1))), eval_bv(sum));
 	}
 }
