@@ -219,6 +219,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		state.set_initial();
 		state.define_transition_stack_pointer();
+		state.define_transition_stack();
+		state.define_transition();
 
 		state
 	}
@@ -267,6 +269,71 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				self.transition_stack_pointer(pc),
 				stack_pointer_next.eq(new_pointer),
 			));
+		}
+	}
+
+	fn define_transition_stack(&self) {
+		for pc in 0..self.program_length {
+			// constants
+			let instr = self.program(pc);
+			let stack_pointer = self.stack_pointer(pc);
+
+			// preserve stack values stack[0]..stack[stack_pointer - pops]
+			let count_preserved =
+				stack_pointer.clone() - self.constants.stack_pop_count(instr.clone());
+			let n = self.ctx.bound(0, self.constants.int_sort);
+
+			// 1 <= n < 1 + count_preserved implies stack(pc, n) == stack(pc + 1, n)
+			let lhs = self.ctx.and(&[
+				self.ctx.le(self.constants.int(1), n.clone()),
+				self.ctx
+					.lt(n.clone(), count_preserved + self.constants.int(1)),
+			]);
+			let rhs = self.stack(pc, n.clone()).eq(self.stack(pc + 1, n));
+			let body = self.ctx.implies(lhs, rhs);
+
+			// forall n
+			let stack_is_preserved = self.ctx.forall(
+				&[self.constants.int_sort],
+				&[self.ctx.string_symbol("n")],
+				body,
+			);
+
+			// encode instruction effect
+			let new_stack_pointer = self.stack_pointer(pc + 1);
+			// instr == Add implies stack(pc + 1, new_stack_pointer) == stack(pc, stack_pointer) + stack(pc, stack_pointer - 1)
+			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Add));
+
+			let sum = self.ctx.bvadd(
+				self.stack(pc, stack_pointer.clone()),
+				self.stack(pc, stack_pointer.clone() - self.constants.int(1)),
+			);
+			let rhs = self.stack(pc + 1, new_stack_pointer.clone()).eq(sum);
+			let add_effect = self.ctx.implies(lhs, rhs);
+
+			// instr == Const implies stack(pc + 1, new_stack_pointer) == consts(pc)
+			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
+			let rhs = self.stack(pc + 1, new_stack_pointer).eq(self.consts(pc));
+			let const_effect = self.ctx.implies(lhs, rhs);
+
+			let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
+
+			self.solver.assert(self.ctx.iff(
+				self.transition_stack(pc),
+				self.ctx.and(&[stack_is_preserved, instruction_effect]),
+			));
+		}
+	}
+
+	fn define_transition(&self) {
+		for pc in 0..self.program_length {
+			self.solver.assert(
+				self.ctx.iff(
+					self.transition(pc),
+					self.ctx
+						.and(&[self.transition_stack_pointer(pc), self.transition_stack(pc)]),
+				),
+			);
 		}
 	}
 
@@ -458,5 +525,73 @@ mod tests {
 		};
 		assert_eq!(eval(state.consts(0)), 1);
 		assert_eq!(eval(state.consts(1)), 2);
+	}
+
+	#[test]
+	fn transition_const() {
+		let ctx = Context::with_config(&Config::default());
+		let solver = Solver::with_context(&ctx);
+
+		let program = &[Instruction::I32Const(1)];
+
+		let constants = Constants::new(&ctx, &solver, 1);
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		state.set_source_program(program);
+
+		for i in 0..program.len() {
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
+		}
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let eval_int = |ast| -> i64 {
+			let evaled = model.eval(ast);
+			evaled.try_into().unwrap()
+		};
+		assert_eq!(eval_int(state.stack_pointer(1)), 1);
+
+		let eval_bv = |ast| -> i64 {
+			let evaled = model.eval(ctx.bv2int(ast));
+			evaled.try_into().unwrap()
+		};
+		assert_eq!(eval_bv(state.stack(1, constants.int(1))), 1);
+	}
+
+	#[test]
+	fn transition_add() {
+		let ctx = Context::with_config(&Config::default());
+		let solver = Solver::with_context(&ctx);
+
+		let program = &[
+			Instruction::I32Const(1),
+			Instruction::I32Const(2),
+			Instruction::I32Add,
+		];
+
+		let constants = Constants::new(&ctx, &solver, 2);
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		state.set_source_program(program);
+
+		for i in 0..program.len() {
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
+		}
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let eval_int = |ast| -> i64 {
+			let evaled = model.eval(ast);
+			evaled.try_into().unwrap()
+		};
+
+		let eval_bv = |ast| -> i64 {
+			let evaled = model.eval(ctx.bv2int(ast));
+			evaled.try_into().unwrap()
+		};
+		assert_eq!(eval_bv(state.stack(1, constants.int(1))), 1);
+		assert_eq!(eval_bv(state.stack(2, constants.int(1))), 1);
+		assert_eq!(eval_bv(state.stack(2, constants.int(2))), 2);
+		assert_eq!(eval_bv(state.stack(3, constants.int(1))), 3);
 	}
 }
