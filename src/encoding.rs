@@ -29,6 +29,17 @@ fn iter_intructions() -> impl Iterator<Item = &'static Instruction> {
 	INSTRUCTIONS.iter()
 }
 
+fn stack_depth(program: &[Instruction]) -> usize {
+	let mut stack_pointer = 0;
+	let mut lowest = 0;
+	for i in program {
+		let (pops, pushs) = stack_pop_push_count(i);
+		lowest = std::cmp::min(lowest, stack_pointer - pops);
+		stack_pointer = stack_pointer - pops + pushs;
+	}
+	lowest.abs().try_into().unwrap()
+}
+
 struct Constants<'ctx, 'solver> {
 	ctx: &'ctx Context,
 	solver: &'solver Solver<'ctx>,
@@ -421,6 +432,26 @@ mod tests {
 			eval(&constants.stack_push_count(constants.instruction(&Instruction::I32Const(0)))),
 			1
 		);
+	}
+
+	#[test]
+	fn stack_depth_test() {
+		let program = &[];
+		assert_eq!(stack_depth(program), 0);
+
+		let program = &[Instruction::I32Add];
+		assert_eq!(stack_depth(program), 2);
+
+		let program = &[Instruction::I32Const(1), Instruction::I32Add];
+		assert_eq!(stack_depth(program), 1);
+
+		let program = &[
+			Instruction::I32Const(1),
+			Instruction::I32Const(1),
+			Instruction::I32Const(1),
+			Instruction::I32Add,
+		];
+		assert_eq!(stack_depth(program), 0);
 	}
 
 	#[test]
