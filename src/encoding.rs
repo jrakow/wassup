@@ -220,23 +220,26 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		}
 	}
 
-	fn stack_pointer_transition_condition(&self) -> Ast {
-		let mut conditions = vec![];
+	fn define_transition_stack_pointer(&self) {
+		for pc in 0..self.program_length {
+			let pc_next = self.constants.int(pc + 1);
+			let pc = self.constants.int(pc);
 
-		for i in 0..self.program_length {
 			// encode stack_pointer change
-			let stack_pointer = self.stack_pointer(i);
-			let stack_pointer_next = self.stack_pointer(i + 1);
+			let stack_pointer = self.stack_pointer_func.apply(&[pc.clone()]);
+			let stack_pointer_next = self.stack_pointer_func.apply(&[pc_next]);
 
-			let instruction = self.program(i);
+			let instruction = self.program_func.apply(&[pc.clone()]);
 			let pop_count = self.constants.stack_pop_count(instruction.clone());
 			let push_count = self.constants.stack_push_count(instruction);
 
 			let new_pointer = stack_pointer + push_count - pop_count;
-			conditions.push(stack_pointer_next.eq(new_pointer));
-		}
 
-		self.ctx.and(&conditions[..])
+			self.solver.assert(self.ctx.iff(
+				self.transition_stack_pointer_func.apply(&[pc]),
+				stack_pointer_next.eq(new_pointer),
+			));
+		}
 	}
 
 	fn stack_pointer(&self, index: usize) -> Ast {
@@ -369,7 +372,16 @@ mod tests {
 		let constants = Constants::new(&ctx, &solver, 2);
 		let state = State::new(&ctx, &solver, &constants, "", program.len());
 		state.set_source_program(program);
-		solver.assert(state.stack_pointer_transition_condition());
+
+		state.define_transition_stack_pointer();
+
+		for i in 0..program.len() {
+			solver.assert(
+				state
+					.transition_stack_pointer_func
+					.apply(&[constants.int(i)]),
+			);
+		}
 
 		assert!(solver.check());
 		let model = solver.model();
