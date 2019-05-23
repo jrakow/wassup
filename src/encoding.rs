@@ -197,7 +197,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			transition_stack_pointer_func,
 			transition_stack_func,
 		};
+
 		state.set_initial();
+		state.define_transition_stack_pointer();
+
 		state
 	}
 
@@ -382,8 +385,6 @@ mod tests {
 		let constants = Constants::new(&ctx, &solver, 2);
 		let state = State::new(&ctx, &solver, &constants, "", program.len());
 		state.set_source_program(program);
-
-		state.define_transition_stack_pointer();
 
 		for i in 0..program.len() {
 			solver.assert(state.transition_stack_pointer(i));
