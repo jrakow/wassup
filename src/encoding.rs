@@ -204,7 +204,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn set_initial(&self) {
 		// set stack(0, i) == xs[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
-			self.solver.assert(self.stack(0, i).eq(var.clone()));
+			self.solver
+				.assert(self.stack(0, self.constants.int(i)).eq(var.clone()));
 		}
 
 		// set stack_counter(0) = 0
@@ -222,33 +223,42 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_transition_stack_pointer(&self) {
 		for pc in 0..self.program_length {
-			let pc_next = self.constants.int(pc + 1);
-			let pc = self.constants.int(pc);
-
 			// encode stack_pointer change
-			let stack_pointer = self.stack_pointer_func.apply(&[pc.clone()]);
-			let stack_pointer_next = self.stack_pointer_func.apply(&[pc_next]);
+			let stack_pointer = self.stack_pointer(pc);
+			let stack_pointer_next = self.stack_pointer(pc + 1);
 
-			let instruction = self.program_func.apply(&[pc.clone()]);
+			let instruction = self.program(pc);
 			let pop_count = self.constants.stack_pop_count(instruction.clone());
 			let push_count = self.constants.stack_push_count(instruction);
 
 			let new_pointer = stack_pointer + push_count - pop_count;
 
 			self.solver.assert(self.ctx.iff(
-				self.transition_stack_pointer_func.apply(&[pc]),
+				self.transition_stack_pointer(pc),
 				stack_pointer_next.eq(new_pointer),
 			));
 		}
 	}
 
-	fn stack_pointer(&self, index: usize) -> Ast {
-		self.stack_pointer_func.apply(&[self.constants.int(index)])
+	fn transition(&self, pc: usize) -> Ast {
+		self.transition_func.apply(&[self.constants.int(pc)])
 	}
 
-	fn stack(&self, pc: usize, index: usize) -> Ast {
-		self.stack_func
-			.apply(&[self.constants.int(pc), self.constants.int(index)])
+	fn transition_stack_pointer(&self, pc: usize) -> Ast {
+		self.transition_stack_pointer_func
+			.apply(&[self.constants.int(pc)])
+	}
+
+	fn transition_stack(&self, pc: usize) -> Ast {
+		self.transition_stack_func.apply(&[self.constants.int(pc)])
+	}
+
+	fn stack_pointer(&self, pc: usize) -> Ast {
+		self.stack_pointer_func.apply(&[self.constants.int(pc)])
+	}
+
+	fn stack(&self, pc: usize, index: Ast) -> Ast {
+		self.stack_func.apply(&[self.constants.int(pc), index])
 	}
 
 	fn program(&self, pc: usize) -> Ast {
@@ -376,11 +386,7 @@ mod tests {
 		state.define_transition_stack_pointer();
 
 		for i in 0..program.len() {
-			solver.assert(
-				state
-					.transition_stack_pointer_func
-					.apply(&[constants.int(i)]),
-			);
+			solver.assert(state.transition_stack_pointer(i));
 		}
 
 		assert!(solver.check());
