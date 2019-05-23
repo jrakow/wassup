@@ -129,6 +129,9 @@ struct State<'ctx, 'solver, 'constants> {
 	stack_pointer_func: FuncDecl<'ctx>,
 	program_func: FuncDecl<'ctx>,
 	program_length: usize,
+	transition_func: FuncDecl<'ctx>,
+	transition_stack_pointer_func: FuncDecl<'ctx>,
+	transition_stack_func: FuncDecl<'ctx>,
 }
 
 impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
@@ -163,6 +166,23 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			constants.instruction_sort,
 		);
 
+		// declare transition functions
+		let transition_func = ctx.func_decl(
+			ctx.string_symbol(&(prefix.to_owned() + "transition")),
+			&[constants.int_sort],
+			constants.ctx.bool_sort(),
+		);
+		let transition_stack_pointer_func = ctx.func_decl(
+			ctx.string_symbol(&(prefix.to_owned() + "transition-stack-pointer")),
+			&[constants.int_sort],
+			ctx.bool_sort(),
+		);
+		let transition_stack_func = ctx.func_decl(
+			ctx.string_symbol(&(prefix.to_owned() + "transition-stack-pointer")),
+			&[constants.int_sort],
+			ctx.bool_sort(),
+		);
+
 		let state = State {
 			ctx,
 			solver,
@@ -173,6 +193,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			stack_pointer_func,
 			program_func,
 			program_length,
+			transition_func,
+			transition_stack_pointer_func,
+			transition_stack_func,
 		};
 		state.set_initial();
 		state
