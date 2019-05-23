@@ -384,7 +384,11 @@ mod tests {
 		let ctx = Context::with_config(&Config::default());
 		let solver = Solver::with_context(&ctx);
 
-		let program = &[Instruction::I32Const(1)];
+		let program = &[
+			Instruction::I32Const(1),
+			Instruction::I32Const(2),
+			Instruction::I32Add,
+		];
 
 		let constants = Constants::new(&ctx, &solver, 2);
 		let state = State::new(&ctx, &solver, &constants, "", program.len());
@@ -403,5 +407,7 @@ mod tests {
 		};
 		assert_eq!(eval(state.stack_pointer(0)), 0);
 		assert_eq!(eval(state.stack_pointer(1)), 1);
+		assert_eq!(eval(state.stack_pointer(2)), 2);
+		assert_eq!(eval(state.stack_pointer(3)), 1);
 	}
 }
