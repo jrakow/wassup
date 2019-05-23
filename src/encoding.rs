@@ -12,7 +12,7 @@ fn instruction_to_index(i: &Instruction) -> usize {
 	}
 }
 
-fn stack_pop_push_count(i: &Instruction) -> (usize, usize) {
+fn stack_pop_push_count(i: &Instruction) -> (isize, isize) {
 	use Instruction::*;
 
 	match i {
@@ -114,8 +114,12 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		self.stack_push_count_func.apply(&[instr])
 	}
 
-	fn int(&self, i: usize) -> Ast {
+	fn int(&self, i: isize) -> Ast {
 		self.ctx.int(i, self.ctx.int_sort())
+	}
+
+	fn uint(&self, i: usize) -> Ast {
+		self.ctx.uint(i, self.ctx.int_sort())
 	}
 }
 
@@ -208,7 +212,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// set stack(0, i) == xs[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
 			self.solver
-				.assert(self.stack(0, self.constants.int(i)).eq(var.clone()));
+				.assert(self.stack(0, self.constants.uint(i)).eq(var.clone()));
 		}
 
 		// set stack_counter(0) = 0
@@ -244,28 +248,28 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn transition(&self, pc: usize) -> Ast {
-		self.transition_func.apply(&[self.constants.int(pc)])
+		self.transition_func.apply(&[self.constants.uint(pc)])
 	}
 
 	fn transition_stack_pointer(&self, pc: usize) -> Ast {
 		self.transition_stack_pointer_func
-			.apply(&[self.constants.int(pc)])
+			.apply(&[self.constants.uint(pc)])
 	}
 
 	fn transition_stack(&self, pc: usize) -> Ast {
-		self.transition_stack_func.apply(&[self.constants.int(pc)])
+		self.transition_stack_func.apply(&[self.constants.uint(pc)])
 	}
 
 	fn stack_pointer(&self, pc: usize) -> Ast {
-		self.stack_pointer_func.apply(&[self.constants.int(pc)])
+		self.stack_pointer_func.apply(&[self.constants.uint(pc)])
 	}
 
 	fn stack(&self, pc: usize, index: Ast) -> Ast {
-		self.stack_func.apply(&[self.constants.int(pc), index])
+		self.stack_func.apply(&[self.constants.uint(pc), index])
 	}
 
 	fn program(&self, pc: usize) -> Ast {
-		self.program_func.apply(&[self.constants.int(pc)])
+		self.program_func.apply(&[self.constants.uint(pc)])
 	}
 }
 
