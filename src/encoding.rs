@@ -124,6 +124,7 @@ struct State<'ctx, 'solver, 'constants> {
 	solver: &'solver Solver<'ctx>,
 	constants: &'constants Constants<'ctx, 'solver>,
 
+	prefix: String,
 	stack_func: FuncDecl<'ctx>,
 	stack_pointer_func: FuncDecl<'ctx>,
 	program_func: FuncDecl<'ctx>,
@@ -166,6 +167,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			ctx,
 			solver,
 			constants,
+
+			prefix: prefix.to_string(),
 			stack_func,
 			stack_pointer_func,
 			program_func,
