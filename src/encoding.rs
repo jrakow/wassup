@@ -212,6 +212,7 @@ struct State<'ctx, 'solver, 'constants> {
 	transition_func: FuncDecl<'ctx>,
 	transition_stack_pointer_func: FuncDecl<'ctx>,
 	transition_stack_func: FuncDecl<'ctx>,
+	preserve_stack_func: FuncDecl<'ctx>,
 }
 
 impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
@@ -262,6 +263,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&[constants.int_sort],
 			ctx.bool_sort(),
 		);
+		let preserve_stack_func = ctx.func_decl(
+			ctx.string_symbol(&(prefix.to_owned() + "preserve-stack")),
+			&[constants.int_sort],
+			ctx.bool_sort(),
+		);
 
 		let state = State {
 			ctx,
@@ -275,6 +281,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			transition_func,
 			transition_stack_pointer_func,
 			transition_stack_func,
+			preserve_stack_func,
 		};
 
 		if set_program {
@@ -286,6 +293,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		state.define_transition_stack_pointer();
 		state.define_transition_stack();
 		state.define_transition();
+		state.define_preserve_stack();
 
 		state
 	}
@@ -338,26 +346,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let instr = self.program(pc);
 			let stack_pointer = self.stack_pointer(pc);
 
-			// preserve stack values stack(_, 0)..stack(_, stack_pointer - pops - 1)
-			let n = self.ctx.bound(0, self.constants.int_sort);
-
-			let n_in_range = self.constants.in_range(
-				self.constants.uint(0),
-				n.clone(),
-				stack_pointer.clone()
-					- self.constants.stack_pop_count(instr.clone())
-					- self.constants.uint(1),
-			);
-			let slot_preserved = self.stack(pc, n.clone()).eq(self.stack(pc + 1, n));
-			let body = self.ctx.implies(n_in_range, slot_preserved);
-
-			// forall n
-			let stack_is_preserved = self.ctx.forall(
-				&[self.constants.int_sort],
-				&[self.ctx.string_symbol("n")],
-				body,
-			);
-
 			// encode instruction effect
 			let new_stack_pointer = self.stack_pointer(pc + 1);
 
@@ -386,7 +374,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 			self.solver.assert(self.ctx.iff(
 				self.transition_stack(pc),
-				self.ctx.and(&[stack_is_preserved, instruction_effect]),
+				self.ctx.and(&[self.preserve_stack(pc), instruction_effect]),
 			));
 		}
 	}
@@ -403,6 +391,35 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		}
 	}
 
+	fn define_preserve_stack(&self) {
+		for pc in 0..self.constants.source_program.len() {
+			// constants
+			let instr = self.program(pc);
+			let stack_pointer = self.stack_pointer(pc);
+
+			// preserve stack values stack(_, 0)..=stack(_, stack_pointer - pops - 1)
+			let n = self.ctx.bound(0, self.constants.int_sort);
+
+			let n_in_range = self.constants.in_range(
+				self.constants.uint(0),
+				n.clone(),
+				stack_pointer.clone() - self.constants.stack_pop_count(instr.clone()),
+			);
+			let slot_preserved = self.stack(pc, n.clone()).eq(self.stack(pc + 1, n));
+			let body = self.ctx.implies(n_in_range, slot_preserved);
+
+			// forall n
+			let stack_is_preserved = self.ctx.forall(
+				&[self.constants.int_sort],
+				&[self.ctx.string_symbol("n")],
+				body,
+			);
+
+			self.solver
+				.assert(self.ctx.iff(self.preserve_stack(pc), stack_is_preserved));
+		}
+	}
+
 	fn transition(&self, pc: usize) -> Ast {
 		self.transition_func.apply(&[self.constants.uint(pc)])
 	}
@@ -414,6 +431,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn transition_stack(&self, pc: usize) -> Ast {
 		self.transition_stack_func.apply(&[self.constants.uint(pc)])
+	}
+
+	fn preserve_stack(&self, pc: usize) -> Ast {
+		self.preserve_stack_func.apply(&[self.constants.uint(pc)])
 	}
 
 	fn stack_pointer(&self, pc: usize) -> Ast {
