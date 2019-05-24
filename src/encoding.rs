@@ -205,6 +205,7 @@ struct State<'ctx, 'solver, 'constants> {
 	prefix: String,
 
 	stack_func: FuncDecl<'ctx>,
+	// stack_pointer - 1 is top of stack
 	stack_pointer_func: FuncDecl<'ctx>,
 	program_func: FuncDecl<'ctx>,
 
@@ -337,19 +338,18 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let instr = self.program(pc);
 			let stack_pointer = self.stack_pointer(pc);
 
-			// preserve stack values stack[0]..stack[stack_pointer - pops]
-			let count_preserved =
-				stack_pointer.clone() - self.constants.stack_pop_count(instr.clone());
+			// preserve stack values stack(_, 0)..stack(_, stack_pointer - pops - 1)
 			let n = self.ctx.bound(0, self.constants.int_sort);
 
-			// 1 <= n < 1 + count_preserved implies stack(pc, n) == stack(pc + 1, n)
-			let lhs = self.ctx.and(&[
-				self.ctx.le(self.constants.int(1), n.clone()),
-				self.ctx
-					.lt(n.clone(), count_preserved + self.constants.int(1)),
-			]);
-			let rhs = self.stack(pc, n.clone()).eq(self.stack(pc + 1, n));
-			let body = self.ctx.implies(lhs, rhs);
+			let n_in_range = self.constants.in_range(
+				self.constants.uint(0),
+				n.clone(),
+				stack_pointer.clone()
+					- self.constants.stack_pop_count(instr.clone())
+					- self.constants.uint(1),
+			);
+			let slot_preserved = self.stack(pc, n.clone()).eq(self.stack(pc + 1, n));
+			let body = self.ctx.implies(n_in_range, slot_preserved);
 
 			// forall n
 			let stack_is_preserved = self.ctx.forall(
@@ -363,20 +363,22 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 			// instr == Nop
 
-			// instr == Add implies stack(pc + 1, new_stack_pointer) == stack(pc, stack_pointer) + stack(pc, stack_pointer - 1)
+			// instr == Add implies stack(pc + 1, new_stack_pointer - 1) == stack(pc, stack_pointer - 1) + stack(pc, stack_pointer - 2)
 			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Add));
 
 			let sum = self.ctx.bvadd(
-				self.stack(pc, stack_pointer.clone()),
 				self.stack(pc, stack_pointer.clone() - self.constants.int(1)),
+				self.stack(pc, stack_pointer.clone() - self.constants.int(2)),
 			);
-			let rhs = self.stack(pc + 1, new_stack_pointer.clone()).eq(sum);
+			let rhs = self
+				.stack(pc + 1, new_stack_pointer.clone() - self.constants.int(1))
+				.eq(sum);
 			let add_effect = self.ctx.implies(lhs, rhs);
 
-			// instr == Const implies stack(pc + 1, new_stack_pointer) == consts(pc)
+			// instr == Const implies stack(pc + 1, new_stack_pointer - 1) == consts(pc)
 			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
 			let rhs = self
-				.stack(pc + 1, new_stack_pointer)
+				.stack(pc + 1, new_stack_pointer - self.constants.int(1))
 				.eq(self.constants.push_constants(pc));
 			let const_effect = self.ctx.implies(lhs, rhs);
 
@@ -634,7 +636,7 @@ mod tests {
 			let evaled = model.eval(ctx.bv2int(ast));
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval_bv(state.stack(1, constants.int(1))), 1);
+		assert_eq!(eval_bv(state.stack(1, constants.int(0))), 1);
 	}
 
 	#[test]
@@ -668,11 +670,11 @@ mod tests {
 			let evaled = model.eval(ctx.bv2int(ast));
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval_bv(state.stack(1, constants.int(1))), 1);
-		assert_eq!(eval_bv(state.stack(2, constants.int(1))), 1);
-		assert_eq!(eval_bv(state.stack(3, constants.int(1))), 1);
-		assert_eq!(eval_bv(state.stack(3, constants.int(2))), 2);
-		assert_eq!(eval_bv(state.stack(4, constants.int(1))), 3);
+		assert_eq!(eval_bv(state.stack(1, constants.int(0))), 1);
+		assert_eq!(eval_bv(state.stack(2, constants.int(0))), 1);
+		assert_eq!(eval_bv(state.stack(3, constants.int(0))), 1);
+		assert_eq!(eval_bv(state.stack(3, constants.int(1))), 2);
+		assert_eq!(eval_bv(state.stack(4, constants.int(0))), 3);
 	}
 
 	#[test]
@@ -705,6 +707,6 @@ mod tests {
 			constants.initial_stack[0].clone(),
 			constants.initial_stack[1].clone(),
 		);
-		assert_eq!(eval_bv(state.stack(1, constants.int(1))), eval_bv(sum));
+		assert_eq!(eval_bv(state.stack(1, constants.int(0))), eval_bv(sum));
 	}
 }
