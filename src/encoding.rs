@@ -53,6 +53,7 @@ struct Constants<'ctx, 'solver> {
 	instruction_testers: Vec<FuncDecl<'ctx>>,
 	stack_pop_count_func: FuncDecl<'ctx>,
 	stack_push_count_func: FuncDecl<'ctx>,
+	in_range_func: FuncDecl<'ctx>,
 	initial_stack: Vec<Ast<'ctx>>,
 
 	source_program: Vec<Instruction>,
@@ -92,6 +93,11 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			&[instruction_sort],
 			int_sort,
 		);
+		let in_range_func = ctx.func_decl(
+			ctx.string_symbol("in-range"),
+			&[int_sort, int_sort, int_sort],
+			ctx.bool_sort(),
+		);
 
 		// declare consts function
 		let push_constants_func =
@@ -107,6 +113,7 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			instruction_testers,
 			stack_pop_count_func,
 			stack_push_count_func,
+			in_range_func,
 			initial_stack,
 			source_program: source_program.to_owned(),
 			push_constants_func,
@@ -137,6 +144,23 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			);
 		}
 
+		// define in-range(a, b, c): a <= b && b < c
+		let c = ctx.bound(0, int_sort);
+		let b = ctx.bound(1, int_sort);
+		let a = ctx.bound(2, int_sort);
+		let body = constants
+			.in_range(a.clone(), b.clone(), c.clone())
+			.eq(ctx.and(&[ctx.le(a, b.clone()), ctx.lt(b, c)]));
+		solver.assert(ctx.forall(
+			&[int_sort, int_sort, int_sort],
+			&[
+				ctx.string_symbol("a"),
+				ctx.string_symbol("b"),
+				ctx.string_symbol("c"),
+			],
+			body,
+		));
+
 		constants
 	}
 
@@ -150,6 +174,10 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 
 	fn stack_push_count(&self, instr: Ast) -> Ast {
 		self.stack_push_count_func.apply(&[instr])
+	}
+
+	fn in_range(&self, a: Ast, b: Ast, c: Ast) -> Ast {
+		self.in_range_func.apply(&[a, b, c])
 	}
 
 	fn push_constants(&self, pc: usize) -> Ast {
