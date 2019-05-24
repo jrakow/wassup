@@ -229,7 +229,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			ctx.bool_sort(),
 		);
 		let transition_stack_func = ctx.func_decl(
-			ctx.string_symbol(&(prefix.to_owned() + "transition-stack-pointer")),
+			ctx.string_symbol(&(prefix.to_owned() + "transition-stack")),
 			&[constants.int_sort],
 			ctx.bool_sort(),
 		);
