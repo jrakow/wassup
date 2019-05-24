@@ -56,6 +56,7 @@ struct Constants<'ctx, 'solver> {
 	initial_stack: Vec<Ast<'ctx>>,
 
 	source_program: Vec<Instruction>,
+	push_constants_func: FuncDecl<'ctx>,
 	stack_depth: usize,
 }
 
@@ -92,6 +93,10 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			int_sort,
 		);
 
+		// declare consts function
+		let push_constants_func =
+			ctx.func_decl(ctx.string_symbol("push_constants"), &[int_sort], word_sort);
+
 		let constants = Constants {
 			ctx,
 			solver,
@@ -104,8 +109,17 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			stack_push_count_func,
 			initial_stack,
 			source_program: source_program.to_owned(),
+			push_constants_func,
 			stack_depth: stack_depth(source_program),
 		};
+
+		// set push_constants function
+		for (pc, instr) in source_program.iter().enumerate() {
+			if let Instruction::I32Const(i) = instr {
+				let i = constants.int2word(constants.int((*i).try_into().unwrap()));
+				solver.assert(constants.push_constants(pc).eq(i));
+			}
+		}
 
 		let int = |i| ctx.int(i, int_sort);
 
@@ -138,6 +152,10 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		self.stack_push_count_func.apply(&[instr])
 	}
 
+	fn push_constants(&self, pc: usize) -> Ast {
+		self.push_constants_func.apply(&[self.uint(pc)])
+	}
+
 	fn int(&self, i: isize) -> Ast {
 		self.ctx.int(i, self.ctx.int_sort())
 	}
@@ -161,7 +179,6 @@ struct State<'ctx, 'solver, 'constants> {
 	stack_func: FuncDecl<'ctx>,
 	stack_pointer_func: FuncDecl<'ctx>,
 	program_func: FuncDecl<'ctx>,
-	consts_func: FuncDecl<'ctx>,
 
 	transition_func: FuncDecl<'ctx>,
 	transition_stack_pointer_func: FuncDecl<'ctx>,
@@ -191,13 +208,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			ctx.string_symbol(&format!("{}stack-pointer", prefix)),
 			&[constants.int_sort],
 			constants.int_sort,
-		);
-
-		// declare consts function
-		let consts_func = ctx.func_decl(
-			ctx.string_symbol(&format!("{}consts", prefix)),
-			&[constants.int_sort],
-			constants.word_sort,
 		);
 
 		// declare program function
@@ -233,7 +243,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			stack_func,
 			stack_pointer_func,
 			program_func,
-			consts_func,
 			transition_func,
 			transition_stack_pointer_func,
 			transition_stack_func,
@@ -270,15 +279,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn set_source_program(&self, program: &[Instruction]) {
 		// set program_func to program
 		for (pc, instruction) in program.iter().enumerate() {
-			if let Instruction::I32Const(i) = instruction {
-				let i = self
-					.constants
-					.int2word(self.constants.int((*i).try_into().unwrap()));
-				self.solver.assert(self.consts(pc).eq(i));
-			}
-
 			let instruction = self.constants.instruction(instruction);
-
 			self.solver.assert(self.program(pc).eq(instruction))
 		}
 	}
@@ -346,7 +347,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 			// instr == Const implies stack(pc + 1, new_stack_pointer) == consts(pc)
 			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
-			let rhs = self.stack(pc + 1, new_stack_pointer).eq(self.consts(pc));
+			let rhs = self
+				.stack(pc + 1, new_stack_pointer)
+				.eq(self.constants.push_constants(pc));
 			let const_effect = self.ctx.implies(lhs, rhs);
 
 			let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
@@ -393,10 +396,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn program(&self, pc: usize) -> Ast {
 		self.program_func.apply(&[self.constants.uint(pc)])
-	}
-
-	fn consts(&self, pc: usize) -> Ast {
-		self.consts_func.apply(&[self.constants.uint(pc)])
 	}
 }
 
@@ -576,8 +575,8 @@ mod tests {
 			let evaled = model.eval(ast);
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval(state.consts(0)), 1);
-		assert_eq!(eval(state.consts(1)), 2);
+		assert_eq!(eval(constants.push_constants(0)), 1);
+		assert_eq!(eval(constants.push_constants(1)), 2);
 	}
 
 	#[test]
