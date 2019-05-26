@@ -244,7 +244,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		);
 		let transition_stack_func = ctx.func_decl(
 			ctx.string_symbol(&(prefix.to_owned() + "transition-stack")),
-			&[constants.int_sort],
+			&[constants.int_sort, constants.instruction_sort],
 			ctx.bool_sort(),
 		);
 		let preserve_stack_func = ctx.func_decl(
@@ -399,7 +399,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		let definition = self
 			.ctx
-			.iff(self.transition_stack(pc.clone()), instruction_effect);
+			.iff(self.transition_stack(pc.clone(), instr), instruction_effect);
 
 		self.solver.assert(
 			self.ctx
@@ -422,7 +422,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			self.ctx.and(&[
 				self.preserve_stack(pc.clone()),
 				self.transition_stack_pointer(pc.clone()),
-				self.transition_stack(pc.clone()),
+				self.transition_stack(pc.clone(), self.program(pc.clone())),
 			]),
 		);
 
@@ -484,8 +484,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		self.transition_stack_pointer_func.apply(&[pc])
 	}
 
-	fn transition_stack(&self, pc: Ast) -> Ast {
-		self.transition_stack_func.apply(&[pc])
+	fn transition_stack(&self, pc: Ast, instr: Ast) -> Ast {
+		self.transition_stack_func.apply(&[pc, instr])
 	}
 
 	fn preserve_stack(&self, pc: Ast) -> Ast {
