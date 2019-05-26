@@ -321,121 +321,161 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn define_transition_stack_pointer(&self) {
-		for pc in 0..self.program_length {
-			// encode stack_pointer change
-			let stack_pointer = self.stack_pointer(self.constants.uint(pc));
-			let stack_pointer_next = self.stack_pointer(self.constants.uint(pc + 1));
+		let pc = self
+			.ctx
+			.r#const(self.ctx.string_symbol("pc"), self.constants.int_sort);
+		let pc_in_range = self.constants.in_range(
+			self.constants.uint(0),
+			pc.clone(),
+			self.constants.uint(self.program_length),
+		);
 
-			let instruction = self.program(self.constants.uint(pc));
-			let pop_count = self.constants.stack_pop_count(instruction.clone());
-			let push_count = self.constants.stack_push_count(instruction);
+		// encode stack_pointer change
+		let stack_pointer = self.stack_pointer(pc.clone());
+		let stack_pointer_next = self.stack_pointer(pc.clone() + self.constants.uint(1));
 
-			let new_pointer = stack_pointer + push_count - pop_count;
+		let instruction = self.program(pc.clone());
+		let pop_count = self.constants.stack_pop_count(instruction.clone());
+		let push_count = self.constants.stack_push_count(instruction);
 
-			self.solver.assert(self.ctx.iff(
-				self.transition_stack_pointer(self.constants.uint(pc)),
-				stack_pointer_next.eq(new_pointer),
-			));
-		}
+		let new_pointer = stack_pointer + push_count - pop_count;
+
+		let definition = self.ctx.iff(
+			self.transition_stack_pointer(pc.clone()),
+			stack_pointer_next.eq(new_pointer),
+		);
+
+		self.solver.assert(
+			self.ctx
+				.forall_const(&[pc], self.ctx.implies(pc_in_range, definition)),
+		);
 	}
 
 	fn define_transition_stack(&self) {
-		for pc in 0..self.program_length {
-			// constants
-			let instr = self.program(self.constants.uint(pc));
-			let stack_pointer = self.stack_pointer(self.constants.uint(pc));
+		let pc = self
+			.ctx
+			.r#const(self.ctx.string_symbol("pc"), self.constants.int_sort);
+		let pc_in_range = self.constants.in_range(
+			self.constants.uint(0),
+			pc.clone(),
+			self.constants.uint(self.program_length),
+		);
 
-			// encode instruction effect
-			let new_stack_pointer = self.stack_pointer(self.constants.uint(pc + 1));
+		// constants
+		let instr = self.program(pc.clone());
+		let stack_pointer = self.stack_pointer(pc.clone());
 
-			// instr == Nop
+		// encode instruction effect
+		let new_stack_pointer = self.stack_pointer(pc.clone() + self.constants.uint(1));
 
-			// instr == Add implies stack(pc + 1, new_stack_pointer - 1) == stack(pc, stack_pointer - 1) + stack(pc, stack_pointer - 2)
-			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Add));
+		// instr == Nop
 
-			let sum = self.ctx.bvadd(
-				self.stack(
-					self.constants.uint(pc),
-					stack_pointer.clone() - self.constants.int(1),
-				),
-				self.stack(
-					self.constants.uint(pc),
-					stack_pointer.clone() - self.constants.int(2),
-				),
-			);
-			let rhs = self
-				.stack(
-					self.constants.uint(pc + 1),
-					new_stack_pointer.clone() - self.constants.int(1),
-				)
-				.eq(sum);
-			let add_effect = self.ctx.implies(lhs, rhs);
+		// instr == Add implies stack(pc + 1, new_stack_pointer - 1) == stack(pc, stack_pointer - 1) + stack(pc, stack_pointer - 2)
+		let lhs = instr.eq(self.constants.instruction(&Instruction::I32Add));
 
-			// instr == Const implies stack(pc + 1, new_stack_pointer - 1) == consts(pc)
-			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
-			let rhs = self
-				.stack(
-					self.constants.uint(pc + 1),
-					new_stack_pointer - self.constants.int(1),
-				)
-				.eq(self.push_constants(self.constants.uint(pc)));
-			let const_effect = self.ctx.implies(lhs, rhs);
+		let sum = self.ctx.bvadd(
+			self.stack(pc.clone(), stack_pointer.clone() - self.constants.int(1)),
+			self.stack(pc.clone(), stack_pointer.clone() - self.constants.int(2)),
+		);
+		let rhs = self
+			.stack(
+				pc.clone() + self.constants.uint(1),
+				new_stack_pointer.clone() - self.constants.int(1),
+			)
+			.eq(sum);
+		let add_effect = self.ctx.implies(lhs, rhs);
 
-			let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
+		// instr == Const implies stack(pc + 1, new_stack_pointer - 1) == consts(pc)
+		let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
+		let rhs = self
+			.stack(
+				pc.clone() + self.constants.uint(1),
+				new_stack_pointer - self.constants.int(1),
+			)
+			.eq(self.push_constants(pc.clone()));
+		let const_effect = self.ctx.implies(lhs, rhs);
 
-			self.solver.assert(self.ctx.iff(
-				self.transition_stack(self.constants.uint(pc)),
-				self.ctx.and(&[
-					self.preserve_stack(self.constants.uint(pc)),
-					instruction_effect,
-				]),
-			));
-		}
+		let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
+
+		let definition = self.ctx.iff(
+			self.transition_stack(pc.clone()),
+			self.ctx
+				.and(&[self.preserve_stack(pc.clone()), instruction_effect]),
+		);
+
+		self.solver.assert(
+			self.ctx
+				.forall_const(&[pc], self.ctx.implies(pc_in_range, definition)),
+		);
 	}
 
 	fn define_transition(&self) {
-		for pc in 0..self.program_length {
-			self.solver.assert(self.ctx.iff(
-				self.transition(self.constants.uint(pc)),
-				self.ctx.and(&[
-					self.transition_stack_pointer(self.constants.uint(pc)),
-					self.transition_stack(self.constants.uint(pc)),
-				]),
-			));
-		}
+		let pc = self
+			.ctx
+			.r#const(self.ctx.string_symbol("pc"), self.constants.int_sort);
+		let pc_in_range = self.constants.in_range(
+			self.constants.uint(0),
+			pc.clone(),
+			self.constants.uint(self.program_length),
+		);
+
+		let definition = self.ctx.iff(
+			self.transition(pc.clone()),
+			self.ctx.and(&[
+				self.transition_stack_pointer(pc.clone()),
+				self.transition_stack(pc.clone()),
+			]),
+		);
+
+		self.solver.assert(
+			self.ctx
+				.forall_const(&[pc], self.ctx.implies(pc_in_range, definition)),
+		);
 	}
 
 	fn define_preserve_stack(&self) {
-		for pc in 0..self.program_length {
-			// constants
-			let instr = self.program(self.constants.uint(pc));
-			let stack_pointer = self.stack_pointer(self.constants.uint(pc));
+		let pc = self
+			.ctx
+			.r#const(self.ctx.string_symbol("pc"), self.constants.int_sort);
+		let pc_in_range = self.constants.in_range(
+			self.constants.uint(0),
+			pc.clone(),
+			self.constants.uint(self.program_length),
+		);
 
-			// preserve stack values stack(_, 0)..=stack(_, stack_pointer - pops - 1)
-			let n = self.ctx.bound(0, self.constants.int_sort);
+		// constants
+		let instr = self.program(pc.clone());
+		let stack_pointer = self.stack_pointer(pc.clone());
 
-			let n_in_range = self.constants.in_range(
-				self.constants.uint(0),
-				n.clone(),
-				stack_pointer.clone() - self.constants.stack_pop_count(instr.clone()),
-			);
-			let slot_preserved = self
-				.stack(self.constants.uint(pc), n.clone())
-				.eq(self.stack(self.constants.uint(pc + 1), n));
-			let body = self.ctx.implies(n_in_range, slot_preserved);
+		// preserve stack values stack(_, 0)..=stack(_, stack_pointer - pops - 1)
+		let n = self.ctx.bound(0, self.constants.int_sort);
 
-			// forall n
-			let stack_is_preserved = self.ctx.forall(
-				&[self.constants.int_sort],
-				&[self.ctx.string_symbol("n")],
-				body,
-			);
+		let n_in_range = self.constants.in_range(
+			self.constants.uint(0),
+			n.clone(),
+			stack_pointer.clone() - self.constants.stack_pop_count(instr.clone()),
+		);
+		let slot_preserved = self
+			.stack(pc.clone(), n.clone())
+			.eq(self.stack(pc.clone() + self.constants.uint(1), n));
+		let body = self.ctx.implies(n_in_range, slot_preserved);
 
-			self.solver.assert(self.ctx.iff(
-				self.preserve_stack(self.constants.uint(pc)),
-				stack_is_preserved,
-			));
-		}
+		// forall n
+		let stack_is_preserved = self.ctx.forall(
+			&[self.constants.int_sort],
+			&[self.ctx.string_symbol("n")],
+			body,
+		);
+
+		let definition = self.ctx.iff(
+			self.preserve_stack(pc.clone()),
+			stack_is_preserved,
+		);
+
+		self.solver.assert(
+			self.ctx
+				.forall_const(&[pc], self.ctx.implies(pc_in_range, definition)),
+		);
 	}
 
 	fn transition(&self, pc: Ast) -> Ast {
