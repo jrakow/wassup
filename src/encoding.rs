@@ -842,8 +842,8 @@ mod tests {
 			let evaled = model.eval(ast);
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval(state.push_constants(constants.uint(1))), 2);
 		assert_eq!(eval(state.push_constants(constants.uint(0))), 1);
+		assert_eq!(eval(state.push_constants(constants.uint(1))), 2);
 	}
 
 	#[test]
