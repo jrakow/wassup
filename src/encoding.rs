@@ -397,11 +397,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
 
-		let definition = self.ctx.iff(
-			self.transition_stack(pc.clone()),
-			self.ctx
-				.and(&[self.preserve_stack(pc.clone()), instruction_effect]),
-		);
+		let definition = self
+			.ctx
+			.iff(self.transition_stack(pc.clone()), instruction_effect);
 
 		self.solver.assert(
 			self.ctx
@@ -422,6 +420,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let definition = self.ctx.iff(
 			self.transition(pc.clone()),
 			self.ctx.and(&[
+				self.preserve_stack(pc.clone()),
 				self.transition_stack_pointer(pc.clone()),
 				self.transition_stack(pc.clone()),
 			]),
@@ -467,10 +466,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			body,
 		);
 
-		let definition = self.ctx.iff(
-			self.preserve_stack(pc.clone()),
-			stack_is_preserved,
-		);
+		let definition = self
+			.ctx
+			.iff(self.preserve_stack(pc.clone()), stack_is_preserved);
 
 		self.solver.assert(
 			self.ctx
