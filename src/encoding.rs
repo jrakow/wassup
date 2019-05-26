@@ -55,18 +55,11 @@ struct Constants<'ctx, 'solver> {
 	stack_push_count_func: FuncDecl<'ctx>,
 	in_range_func: FuncDecl<'ctx>,
 	initial_stack: Vec<Ast<'ctx>>,
-
-	source_program: Vec<Instruction>,
-	push_constants_func: FuncDecl<'ctx>,
 	stack_depth: usize,
 }
 
 impl<'ctx, 'solver> Constants<'ctx, 'solver> {
-	fn new(
-		ctx: &'ctx Context,
-		solver: &'solver Solver<'ctx>,
-		source_program: &[Instruction],
-	) -> Self {
+	fn new(ctx: &'ctx Context, solver: &'solver Solver<'ctx>, stack_depth: usize) -> Self {
 		use Instruction::*;
 
 		let word_sort = ctx.bv_sort(32);
@@ -79,7 +72,7 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 				ctx.string_symbol("Nop"),
 			],
 		);
-		let initial_stack: Vec<_> = (0..stack_depth(source_program))
+		let initial_stack: Vec<_> = (0..stack_depth)
 			.map(|i| ctx.fresh_const("initial-stack", word_sort))
 			.collect();
 
@@ -99,10 +92,6 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			ctx.bool_sort(),
 		);
 
-		// declare consts function
-		let push_constants_func =
-			ctx.func_decl(ctx.string_symbol("push_constants"), &[int_sort], word_sort);
-
 		let constants = Constants {
 			ctx,
 			solver,
@@ -115,18 +104,8 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			stack_push_count_func,
 			in_range_func,
 			initial_stack,
-			source_program: source_program.to_owned(),
-			push_constants_func,
-			stack_depth: stack_depth(source_program),
+			stack_depth,
 		};
-
-		// set push_constants function
-		for (pc, instr) in source_program.iter().enumerate() {
-			if let Instruction::I32Const(i) = instr {
-				let i = constants.int2word(constants.int((*i).try_into().unwrap()));
-				solver.assert(constants.push_constants(pc).eq(i));
-			}
-		}
 
 		let int = |i| ctx.int(i, int_sort);
 
@@ -180,10 +159,6 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		self.in_range_func.apply(&[a, b, c])
 	}
 
-	fn push_constants(&self, pc: usize) -> Ast {
-		self.push_constants_func.apply(&[self.uint(pc)])
-	}
-
 	fn int(&self, i: isize) -> Ast {
 		self.ctx.int(i, self.ctx.int_sort())
 	}
@@ -207,7 +182,10 @@ struct State<'ctx, 'solver, 'constants> {
 	stack_func: FuncDecl<'ctx>,
 	// stack_pointer - 1 is top of stack
 	stack_pointer_func: FuncDecl<'ctx>,
+
+	program_length: usize,
 	program_func: FuncDecl<'ctx>,
+	push_constants_func: FuncDecl<'ctx>,
 
 	transition_func: FuncDecl<'ctx>,
 	transition_stack_pointer_func: FuncDecl<'ctx>,
@@ -221,7 +199,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		solver: &'solver Solver<'ctx>,
 		constants: &'constants Constants<'ctx, 'solver>,
 		prefix: &str,
-		set_program: bool,
+		program_length: usize,
 	) -> Self {
 		// declare stack function
 		let stack_func = ctx.func_decl(
@@ -245,6 +223,12 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			ctx.string_symbol(&format!("{}program", prefix)),
 			&[constants.int_sort],
 			constants.instruction_sort,
+		);
+		// declare push_constants function
+		let push_constants_func = ctx.func_decl(
+			ctx.string_symbol(&(prefix.to_owned() + "push_constants")),
+			&[constants.int_sort],
+			constants.word_sort,
 		);
 
 		// declare transition functions
@@ -277,16 +261,16 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			prefix: prefix.to_string(),
 			stack_func,
 			stack_pointer_func,
+
+			program_length,
 			program_func,
+			push_constants_func,
+
 			transition_func,
 			transition_stack_pointer_func,
 			transition_stack_func,
 			preserve_stack_func,
 		};
-
-		if set_program {
-			state.set_source_program(&constants.source_program);
-		}
 
 		state.set_initial();
 
@@ -307,22 +291,33 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// set stack_counter(0) = 0
 		self.solver.assert(
-			self.stack_pointer(0).eq(self
-				.constants
-				.int(stack_depth(&self.constants.source_program) as isize)),
+			self.stack_pointer(0)
+				.eq(self.constants.uint(self.constants.stack_depth)),
 		);
 	}
 
 	fn set_source_program(&self, program: &[Instruction]) {
+		assert_eq!(self.program_length, program.len());
+
 		// set program_func to program
 		for (pc, instruction) in program.iter().enumerate() {
 			let instruction = self.constants.instruction(instruction);
 			self.solver.assert(self.program(pc).eq(instruction))
 		}
+
+		// set push_constants function
+		for (pc, instr) in program.iter().enumerate() {
+			if let Instruction::I32Const(i) = instr {
+				let i = self
+					.constants
+					.int2word(self.constants.int((*i).try_into().unwrap()));
+				self.solver.assert(self.push_constants(pc).eq(i));
+			}
+		}
 	}
 
 	fn define_transition_stack_pointer(&self) {
-		for pc in 0..self.constants.source_program.len() {
+		for pc in 0..self.program_length {
 			// encode stack_pointer change
 			let stack_pointer = self.stack_pointer(pc);
 			let stack_pointer_next = self.stack_pointer(pc + 1);
@@ -341,7 +336,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn define_transition_stack(&self) {
-		for pc in 0..self.constants.source_program.len() {
+		for pc in 0..self.program_length {
 			// constants
 			let instr = self.program(pc);
 			let stack_pointer = self.stack_pointer(pc);
@@ -367,7 +362,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
 			let rhs = self
 				.stack(pc + 1, new_stack_pointer - self.constants.int(1))
-				.eq(self.constants.push_constants(pc));
+				.eq(self.push_constants(pc));
 			let const_effect = self.ctx.implies(lhs, rhs);
 
 			let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
@@ -380,7 +375,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn define_transition(&self) {
-		for pc in 0..self.constants.source_program.len() {
+		for pc in 0..self.program_length {
 			self.solver.assert(
 				self.ctx.iff(
 					self.transition(pc),
@@ -392,7 +387,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn define_preserve_stack(&self) {
-		for pc in 0..self.constants.source_program.len() {
+		for pc in 0..self.program_length {
 			// constants
 			let instr = self.program(pc);
 			let stack_pointer = self.stack_pointer(pc);
@@ -448,6 +443,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn program(&self, pc: usize) -> Ast {
 		self.program_func.apply(&[self.constants.uint(pc)])
 	}
+
+	fn push_constants(&self, pc: usize) -> Ast {
+		self.push_constants_func.apply(&[self.constants.uint(pc)])
+	}
 }
 
 fn gas_particle_cost(_: &Instruction) -> usize {
@@ -465,7 +464,7 @@ mod tests {
 			Context::with_config(&cfg)
 		};
 		let solver = Solver::with_context(&ctx);
-		let constants = Constants::new(&ctx, &solver, &[]);
+		let constants = Constants::new(&ctx, &solver, 0);
 
 		assert!(constants.solver.check());
 		let model = constants.solver.model();
@@ -538,8 +537,10 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, program);
-		let state = State::new(&ctx, &solver, &constants, "", true);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+
+		state.set_source_program(program);
 
 		assert!(constants.solver.check());
 		let model = constants.solver.model();
@@ -564,8 +565,10 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, program);
-		let state = State::new(&ctx, &solver, &constants, "", true);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+
+		state.set_source_program(program);
 
 		assert!(solver.check());
 		let model = solver.model();
@@ -586,8 +589,10 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, program);
-		let state = State::new(&ctx, &solver, &constants, "", true);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+
+		state.set_source_program(program);
 
 		for i in 0..program.len() {
 			solver.assert(ctx.forall_const(
@@ -616,8 +621,10 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
 
-		let constants = Constants::new(&ctx, &solver, program);
-		let state = State::new(&ctx, &solver, &constants, "", true);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+
+		state.set_source_program(program);
 
 		assert!(solver.check());
 		let model = solver.model();
@@ -626,8 +633,8 @@ mod tests {
 			let evaled = model.eval(ast);
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval(constants.push_constants(0)), 1);
-		assert_eq!(eval(constants.push_constants(1)), 2);
+		assert_eq!(eval(state.push_constants(0)), 1);
+		assert_eq!(eval(state.push_constants(1)), 2);
 	}
 
 	#[test]
@@ -637,8 +644,10 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1)];
 
-		let constants = Constants::new(&ctx, &solver, program);
-		let state = State::new(&ctx, &solver, &constants, "", true);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+
+		state.set_source_program(program);
 
 		for i in 0..program.len() {
 			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
@@ -672,8 +681,10 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, program);
-		let state = State::new(&ctx, &solver, &constants, "", true);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+
+		state.set_source_program(program);
 
 		for i in 0..program.len() {
 			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
@@ -705,8 +716,10 @@ mod tests {
 
 		let program = &[Instruction::I32Add];
 
-		let constants = Constants::new(&ctx, &solver, program);
-		let state = State::new(&ctx, &solver, &constants, "", true);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let state = State::new(&ctx, &solver, &constants, "", program.len());
+
+		state.set_source_program(program);
 
 		for i in 0..program.len() {
 			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
