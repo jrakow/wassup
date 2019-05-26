@@ -285,13 +285,15 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn set_initial(&self) {
 		// set stack(0, i) == xs[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
-			self.solver
-				.assert(self.stack(0, self.constants.uint(i)).eq(var.clone()));
+			self.solver.assert(
+				self.stack(self.constants.uint(0), self.constants.uint(i))
+					.eq(var.clone()),
+			);
 		}
 
 		// set stack_counter(0) = 0
 		self.solver.assert(
-			self.stack_pointer(0)
+			self.stack_pointer(self.constants.uint(0))
 				.eq(self.constants.uint(self.constants.stack_depth)),
 		);
 	}
@@ -302,7 +304,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// set program_func to program
 		for (pc, instruction) in program.iter().enumerate() {
 			let instruction = self.constants.instruction(instruction);
-			self.solver.assert(self.program(pc).eq(instruction))
+			self.solver
+				.assert(self.program(self.constants.uint(pc)).eq(instruction))
 		}
 
 		// set push_constants function
@@ -311,7 +314,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				let i = self
 					.constants
 					.int2word(self.constants.int((*i).try_into().unwrap()));
-				self.solver.assert(self.push_constants(pc).eq(i));
+				self.solver
+					.assert(self.push_constants(self.constants.uint(pc)).eq(i));
 			}
 		}
 	}
@@ -319,17 +323,17 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn define_transition_stack_pointer(&self) {
 		for pc in 0..self.program_length {
 			// encode stack_pointer change
-			let stack_pointer = self.stack_pointer(pc);
-			let stack_pointer_next = self.stack_pointer(pc + 1);
+			let stack_pointer = self.stack_pointer(self.constants.uint(pc));
+			let stack_pointer_next = self.stack_pointer(self.constants.uint(pc + 1));
 
-			let instruction = self.program(pc);
+			let instruction = self.program(self.constants.uint(pc));
 			let pop_count = self.constants.stack_pop_count(instruction.clone());
 			let push_count = self.constants.stack_push_count(instruction);
 
 			let new_pointer = stack_pointer + push_count - pop_count;
 
 			self.solver.assert(self.ctx.iff(
-				self.transition_stack_pointer(pc),
+				self.transition_stack_pointer(self.constants.uint(pc)),
 				stack_pointer_next.eq(new_pointer),
 			));
 		}
@@ -338,11 +342,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn define_transition_stack(&self) {
 		for pc in 0..self.program_length {
 			// constants
-			let instr = self.program(pc);
-			let stack_pointer = self.stack_pointer(pc);
+			let instr = self.program(self.constants.uint(pc));
+			let stack_pointer = self.stack_pointer(self.constants.uint(pc));
 
 			// encode instruction effect
-			let new_stack_pointer = self.stack_pointer(pc + 1);
+			let new_stack_pointer = self.stack_pointer(self.constants.uint(pc + 1));
 
 			// instr == Nop
 
@@ -350,47 +354,62 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Add));
 
 			let sum = self.ctx.bvadd(
-				self.stack(pc, stack_pointer.clone() - self.constants.int(1)),
-				self.stack(pc, stack_pointer.clone() - self.constants.int(2)),
+				self.stack(
+					self.constants.uint(pc),
+					stack_pointer.clone() - self.constants.int(1),
+				),
+				self.stack(
+					self.constants.uint(pc),
+					stack_pointer.clone() - self.constants.int(2),
+				),
 			);
 			let rhs = self
-				.stack(pc + 1, new_stack_pointer.clone() - self.constants.int(1))
+				.stack(
+					self.constants.uint(pc + 1),
+					new_stack_pointer.clone() - self.constants.int(1),
+				)
 				.eq(sum);
 			let add_effect = self.ctx.implies(lhs, rhs);
 
 			// instr == Const implies stack(pc + 1, new_stack_pointer - 1) == consts(pc)
 			let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
 			let rhs = self
-				.stack(pc + 1, new_stack_pointer - self.constants.int(1))
-				.eq(self.push_constants(pc));
+				.stack(
+					self.constants.uint(pc + 1),
+					new_stack_pointer - self.constants.int(1),
+				)
+				.eq(self.push_constants(self.constants.uint(pc)));
 			let const_effect = self.ctx.implies(lhs, rhs);
 
 			let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
 
 			self.solver.assert(self.ctx.iff(
-				self.transition_stack(pc),
-				self.ctx.and(&[self.preserve_stack(pc), instruction_effect]),
+				self.transition_stack(self.constants.uint(pc)),
+				self.ctx.and(&[
+					self.preserve_stack(self.constants.uint(pc)),
+					instruction_effect,
+				]),
 			));
 		}
 	}
 
 	fn define_transition(&self) {
 		for pc in 0..self.program_length {
-			self.solver.assert(
-				self.ctx.iff(
-					self.transition(pc),
-					self.ctx
-						.and(&[self.transition_stack_pointer(pc), self.transition_stack(pc)]),
-				),
-			);
+			self.solver.assert(self.ctx.iff(
+				self.transition(self.constants.uint(pc)),
+				self.ctx.and(&[
+					self.transition_stack_pointer(self.constants.uint(pc)),
+					self.transition_stack(self.constants.uint(pc)),
+				]),
+			));
 		}
 	}
 
 	fn define_preserve_stack(&self) {
 		for pc in 0..self.program_length {
 			// constants
-			let instr = self.program(pc);
-			let stack_pointer = self.stack_pointer(pc);
+			let instr = self.program(self.constants.uint(pc));
+			let stack_pointer = self.stack_pointer(self.constants.uint(pc));
 
 			// preserve stack values stack(_, 0)..=stack(_, stack_pointer - pops - 1)
 			let n = self.ctx.bound(0, self.constants.int_sort);
@@ -400,7 +419,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				n.clone(),
 				stack_pointer.clone() - self.constants.stack_pop_count(instr.clone()),
 			);
-			let slot_preserved = self.stack(pc, n.clone()).eq(self.stack(pc + 1, n));
+			let slot_preserved = self
+				.stack(self.constants.uint(pc), n.clone())
+				.eq(self.stack(self.constants.uint(pc + 1), n));
 			let body = self.ctx.implies(n_in_range, slot_preserved);
 
 			// forall n
@@ -410,42 +431,43 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				body,
 			);
 
-			self.solver
-				.assert(self.ctx.iff(self.preserve_stack(pc), stack_is_preserved));
+			self.solver.assert(self.ctx.iff(
+				self.preserve_stack(self.constants.uint(pc)),
+				stack_is_preserved,
+			));
 		}
 	}
 
-	fn transition(&self, pc: usize) -> Ast {
-		self.transition_func.apply(&[self.constants.uint(pc)])
+	fn transition(&self, pc: Ast) -> Ast {
+		self.transition_func.apply(&[pc])
 	}
 
-	fn transition_stack_pointer(&self, pc: usize) -> Ast {
-		self.transition_stack_pointer_func
-			.apply(&[self.constants.uint(pc)])
+	fn transition_stack_pointer(&self, pc: Ast) -> Ast {
+		self.transition_stack_pointer_func.apply(&[pc])
 	}
 
-	fn transition_stack(&self, pc: usize) -> Ast {
-		self.transition_stack_func.apply(&[self.constants.uint(pc)])
+	fn transition_stack(&self, pc: Ast) -> Ast {
+		self.transition_stack_func.apply(&[pc])
 	}
 
-	fn preserve_stack(&self, pc: usize) -> Ast {
-		self.preserve_stack_func.apply(&[self.constants.uint(pc)])
+	fn preserve_stack(&self, pc: Ast) -> Ast {
+		self.preserve_stack_func.apply(&[pc])
 	}
 
-	fn stack_pointer(&self, pc: usize) -> Ast {
-		self.stack_pointer_func.apply(&[self.constants.uint(pc)])
+	fn stack_pointer(&self, pc: Ast) -> Ast {
+		self.stack_pointer_func.apply(&[pc])
 	}
 
-	fn stack(&self, pc: usize, index: Ast) -> Ast {
-		self.stack_func.apply(&[self.constants.uint(pc), index])
+	fn stack(&self, pc: Ast, index: Ast) -> Ast {
+		self.stack_func.apply(&[pc, index])
 	}
 
-	fn program(&self, pc: usize) -> Ast {
-		self.program_func.apply(&[self.constants.uint(pc)])
+	fn program(&self, pc: Ast) -> Ast {
+		self.program_func.apply(&[pc])
 	}
 
-	fn push_constants(&self, pc: usize) -> Ast {
-		self.push_constants_func.apply(&[self.constants.uint(pc)])
+	fn push_constants(&self, pc: Ast) -> Ast {
+		self.push_constants_func.apply(&[pc])
 	}
 }
 
@@ -597,7 +619,7 @@ mod tests {
 		let model = constants.solver.model();
 
 		for (i, instr) in program.iter().enumerate() {
-			let instr_enc = state.program(i);
+			let instr_enc = state.program(constants.uint(i));
 			let is_equal = constants.instruction_testers[instruction_to_index(instr)]
 				.apply(&[instr_enc.clone()]);
 			let b: bool = model.eval(is_equal).try_into().unwrap();
@@ -624,7 +646,7 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.model();
 
-		let stack_pointer = state.stack_pointer(0);
+		let stack_pointer = state.stack_pointer(constants.uint(0));
 		let stack_pointer_int: i64 = model.eval(stack_pointer).try_into().unwrap();
 		assert_eq!(stack_pointer_int, 0);
 	}
@@ -648,7 +670,7 @@ mod tests {
 		for i in 0..program.len() {
 			solver.assert(ctx.forall_const(
 				&constants.initial_stack[..],
-				state.transition_stack_pointer(i),
+				state.transition_stack_pointer(constants.uint(i)),
 			));
 		}
 
@@ -659,10 +681,10 @@ mod tests {
 			let evaled = model.eval(ast);
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval(state.stack_pointer(0)), 0);
-		assert_eq!(eval(state.stack_pointer(1)), 1);
-		assert_eq!(eval(state.stack_pointer(2)), 2);
-		assert_eq!(eval(state.stack_pointer(3)), 1);
+		assert_eq!(eval(state.stack_pointer(constants.uint(0))), 0);
+		assert_eq!(eval(state.stack_pointer(constants.uint(1))), 1);
+		assert_eq!(eval(state.stack_pointer(constants.uint(2))), 2);
+		assert_eq!(eval(state.stack_pointer(constants.uint(3))), 1);
 	}
 
 	#[test]
@@ -684,8 +706,8 @@ mod tests {
 			let evaled = model.eval(ast);
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval(state.push_constants(0)), 1);
-		assert_eq!(eval(state.push_constants(1)), 2);
+		assert_eq!(eval(state.push_constants(constants.uint(1))), 2);
+		assert_eq!(eval(state.push_constants(constants.uint(0))), 1);
 	}
 
 	#[test]
@@ -701,7 +723,10 @@ mod tests {
 		state.set_source_program(program);
 
 		for i in 0..program.len() {
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				state.transition(constants.uint(i)),
+			));
 		}
 
 		assert!(solver.check());
@@ -711,13 +736,13 @@ mod tests {
 			let evaled = model.eval(ast);
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval_int(state.stack_pointer(1)), 1);
+		assert_eq!(eval_int(state.stack_pointer(constants.uint(1))), 1);
 
 		let eval_bv = |ast| -> i64 {
 			let evaled = model.eval(ctx.bv2int(ast));
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval_bv(state.stack(1, constants.int(0))), 1);
+		assert_eq!(eval_bv(state.stack(constants.uint(1), constants.int(0))), 1);
 	}
 
 	#[test]
@@ -738,7 +763,10 @@ mod tests {
 		state.set_source_program(program);
 
 		for i in 0..program.len() {
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				state.transition(constants.uint(i)),
+			));
 		}
 
 		assert!(solver.check());
@@ -753,11 +781,11 @@ mod tests {
 			let evaled = model.eval(ctx.bv2int(ast));
 			evaled.try_into().unwrap()
 		};
-		assert_eq!(eval_bv(state.stack(1, constants.int(0))), 1);
-		assert_eq!(eval_bv(state.stack(2, constants.int(0))), 1);
-		assert_eq!(eval_bv(state.stack(3, constants.int(0))), 1);
-		assert_eq!(eval_bv(state.stack(3, constants.int(1))), 2);
-		assert_eq!(eval_bv(state.stack(4, constants.int(0))), 3);
+		assert_eq!(eval_bv(state.stack(constants.uint(1), constants.int(0))), 1);
+		assert_eq!(eval_bv(state.stack(constants.uint(2), constants.int(0))), 1);
+		assert_eq!(eval_bv(state.stack(constants.uint(3), constants.int(0))), 1);
+		assert_eq!(eval_bv(state.stack(constants.uint(3), constants.int(1))), 2);
+		assert_eq!(eval_bv(state.stack(constants.uint(4), constants.int(0))), 3);
 	}
 
 	#[test]
@@ -773,7 +801,10 @@ mod tests {
 		state.set_source_program(program);
 
 		for i in 0..program.len() {
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], state.transition(i)));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				state.transition(constants.uint(i)),
+			));
 		}
 
 		assert!(solver.check());
@@ -792,7 +823,10 @@ mod tests {
 			constants.initial_stack[0].clone(),
 			constants.initial_stack[1].clone(),
 		);
-		assert_eq!(eval_bv(state.stack(1, constants.int(0))), eval_bv(sum));
+		assert_eq!(
+			eval_bv(state.stack(constants.uint(1), constants.int(0))),
+			eval_bv(sum)
+		);
 	}
 
 	#[test]
@@ -816,10 +850,14 @@ mod tests {
 		target_state.set_source_program(program);
 
 		for i in 0..program.len() {
-			solver
-				.assert(ctx.forall_const(&constants.initial_stack[..], source_state.transition(i)));
-			solver
-				.assert(ctx.forall_const(&constants.initial_stack[..], target_state.transition(i)));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				source_state.transition(constants.uint(i)),
+			));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				target_state.transition(constants.uint(i)),
+			));
 		}
 
 		let equivalent_func = define_equivalent(&source_state, &target_state);
@@ -853,8 +891,14 @@ mod tests {
 		rhs_state.set_source_program(rhs_program);
 
 		for i in 0..lhs_program.len() {
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], lhs_state.transition(i)));
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], rhs_state.transition(i)));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				lhs_state.transition(constants.uint(i)),
+			));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				rhs_state.transition(constants.uint(i)),
+			));
 		}
 
 		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
@@ -884,8 +928,14 @@ mod tests {
 		rhs_state.set_source_program(rhs_program);
 
 		for i in 0..lhs_program.len() {
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], lhs_state.transition(i)));
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], rhs_state.transition(i)));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				lhs_state.transition(constants.uint(i)),
+			));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				rhs_state.transition(constants.uint(i)),
+			));
 		}
 
 		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
@@ -915,8 +965,14 @@ mod tests {
 		rhs_state.set_source_program(rhs_program);
 
 		for i in 0..lhs_program.len() {
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], lhs_state.transition(i)));
-			solver.assert(ctx.forall_const(&constants.initial_stack[..], rhs_state.transition(i)));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				lhs_state.transition(constants.uint(i)),
+			));
+			solver.assert(ctx.forall_const(
+				&constants.initial_stack[..],
+				rhs_state.transition(constants.uint(i)),
+			));
 		}
 
 		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
