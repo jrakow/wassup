@@ -226,7 +226,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		);
 		// declare push_constants function
 		let push_constants_func = ctx.func_decl(
-			ctx.string_symbol(&(prefix.to_owned() + "push_constants")),
+			ctx.string_symbol(&(prefix.to_owned() + "push-constants")),
 			&[constants.int_sort],
 			constants.word_sort,
 		);
