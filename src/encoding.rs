@@ -581,6 +581,87 @@ fn gas_particle_cost(_: &Instruction) -> usize {
 	1
 }
 
+pub fn superoptimize(source_program: &[Instruction]) -> Option<Vec<Instruction>> {
+	let config = Config::default();
+	let ctx = Context::with_config(&config);
+	let solver = Solver::with_context(&ctx);
+
+	let constants = Constants::new(&ctx, &solver, stack_depth(source_program));
+	let source_state = State::new(&ctx, &solver, &constants, "source-", source_program.len());
+	let target_state = State::new(&ctx, &solver, &constants, "target-", source_program.len());
+	source_state.set_source_program(source_program);
+
+	let source_len = source_program.len();
+
+	for i in 0..source_len {
+		solver.assert(ctx.forall_const(
+			&constants.initial_stack[..],
+			source_state.transition(constants.uint(i)),
+		));
+		solver.assert(ctx.forall_const(
+			&constants.initial_stack[..],
+			target_state.transition(constants.uint(i)),
+		));
+	}
+
+	let equivalent_func = define_equivalent(&source_state, &target_state);
+	let equivalent = |i, j| equivalent_func.apply(&[i, j]);
+
+	let target_length = ctx.r#const(ctx.string_symbol("target-length"), constants.int_sort);
+	// force target program to be shorter
+	let target_length_in_range = constants.in_range(
+		constants.uint(0),
+		target_length.clone(),
+		constants.uint(source_len),
+	);
+
+	let target_better = ctx.and(&[
+		target_length_in_range,
+		equivalent(constants.uint(0), constants.uint(0)),
+		equivalent(constants.uint(source_len), target_length.clone()),
+	]);
+	solver.assert(target_better);
+
+	if !solver.check() {
+		return None;
+	}
+
+	let model = solver.model();
+
+	let target_length: i64 = model.eval(target_length).try_into().unwrap();
+	let target_length: usize = target_length.try_into().unwrap();
+	let mut target_program = Vec::with_capacity(target_length);
+
+	for i in 0..target_length {
+		let encoded_instr = model.eval(target_state.program(constants.uint(i)));
+
+		for instr in iter_intructions() {
+			let equal_tester = &constants.instruction_testers[instruction_to_index(instr)];
+			let equal: bool = model
+				.eval(equal_tester.apply(&[encoded_instr.clone()]))
+				.try_into()
+				.unwrap();
+
+			if equal {
+				let decoded = if let Instruction::I32Const(_) = instr {
+					let push_constant_ast = target_state.push_constants(constants.uint(i));
+					let push_constant: i64 = model.eval(push_constant_ast).try_into().unwrap();
+					// TODO fix cast
+					Instruction::I32Const(push_constant as i32)
+				} else {
+					instr.clone()
+				};
+
+				target_program.push(decoded);
+
+				break;
+			}
+		}
+	}
+
+	Some(target_program)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1039,5 +1120,23 @@ mod tests {
 		let evaled = model.eval(s);
 		let equiv: bool = evaled.try_into().unwrap();
 		assert!(!equiv);
+	}
+
+	#[test]
+	fn superoptimize_nop() {
+		let source_program = &[Instruction::I32Const(1), Instruction::Nop];
+		let target = superoptimize(source_program).unwrap();
+		assert_eq!(target, vec![Instruction::I32Const(1)]);
+	}
+
+	#[test]
+	fn superoptimize_consts_add() {
+		let source_program = &[
+			Instruction::I32Const(1),
+			Instruction::I32Const(2),
+			Instruction::I32Add,
+		];
+		let target = superoptimize(source_program).unwrap();
+		assert_eq!(target, vec![Instruction::I32Const(3)]);
 	}
 }
