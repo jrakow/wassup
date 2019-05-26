@@ -449,6 +449,57 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 }
 
+fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx> {
+	let ctx = lhs.ctx;
+	let constants = rhs.constants;
+	let solver = lhs.solver;
+
+	let lhs_pc = ctx.r#const(ctx.string_symbol("lhs_pc"), constants.int_sort);
+	let rhs_pc = ctx.r#const(ctx.string_symbol("rhs_pc"), constants.int_sort);
+
+	let lhs_program_length = constants.uint(lhs.program_length);
+	let lhs_pc_in_range = constants.in_range(constants.uint(0), lhs_pc.clone(), lhs_program_length);
+	let rhs_program_length = constants.uint(rhs.program_length);
+	let rhs_pc_in_range = constants.in_range(constants.uint(0), rhs_pc.clone(), rhs_program_length);
+
+	let name = &(lhs.prefix.clone() + &rhs.prefix + "equivalent");
+	let equivalent_func = ctx.func_decl(
+		ctx.string_symbol(name),
+		&[constants.int_sort, constants.int_sort],
+		ctx.bool_sort(),
+	);
+
+	let stack_pointers_equal = lhs
+		.stack_pointer_func
+		.apply(&[lhs_pc.clone()])
+		.eq(rhs.stack_pointer_func.apply(&[rhs_pc.clone()]));
+
+	let stacks_equal = {
+		// for 0 <= n < stack_pointer
+		let n = ctx.r#const(ctx.string_symbol("n"), constants.int_sort);
+		let n_in_range = constants.in_range(
+			constants.uint(0),
+			n.clone(),
+			lhs.stack_pointer_func.apply(&[lhs_pc.clone()]),
+		);
+
+		// lhs-stack(lhs_pc, n) ==  rhs-stack(rhs_pc, n)
+		let condition = lhs
+			.stack_func
+			.apply(&[lhs_pc.clone(), n.clone()])
+			.eq(rhs.stack_func.apply(&[rhs_pc.clone(), n.clone()]));
+
+		ctx.forall_const(&[n], ctx.implies(n_in_range, condition))
+	};
+
+	//	let bounds = ctx.and(&[lhs_pc_in_range, rhs_pc_in_range]);
+	let expected = equivalent_func.apply(&[lhs_pc.clone(), rhs_pc.clone()]);
+	let actual = ctx.and(&[stack_pointers_equal, stacks_equal]);
+	solver.assert(ctx.forall_const(&[lhs_pc, rhs_pc], expected.eq(actual)));
+
+	equivalent_func
+}
+
 fn gas_particle_cost(_: &Instruction) -> usize {
 	1
 }
@@ -742,5 +793,140 @@ mod tests {
 			constants.initial_stack[1].clone(),
 		);
 		assert_eq!(eval_bv(state.stack(1, constants.int(0))), eval_bv(sum));
+	}
+
+	#[test]
+	fn equivalent_reflexive() {
+		let config = Config::default();
+		let ctx = Context::with_config(&config);
+		let solver = Solver::with_context(&ctx);
+
+		let program = &[
+			Instruction::I32Const(1),
+			Instruction::Nop,
+			Instruction::I32Const(2),
+			Instruction::I32Add,
+		];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(program));
+		let source_state = State::new(&ctx, &solver, &constants, "source-", program.len());
+		let target_state = State::new(&ctx, &solver, &constants, "target-", program.len());
+
+		source_state.set_source_program(program);
+		target_state.set_source_program(program);
+
+		for i in 0..program.len() {
+			solver
+				.assert(ctx.forall_const(&constants.initial_stack[..], source_state.transition(i)));
+			solver
+				.assert(ctx.forall_const(&constants.initial_stack[..], target_state.transition(i)));
+		}
+
+		let equivalent_func = define_equivalent(&source_state, &target_state);
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let equivalent = |i, j| equivalent_func.apply(&[constants.uint(i), constants.uint(j)]);
+
+		for i in 0..program.len() {
+			let s = equivalent(i, i);
+			let evaled = model.eval(s);
+			let equiv: bool = evaled.try_into().unwrap();
+			assert!(equiv);
+		}
+	}
+
+	#[test]
+	fn equivalent_nop_no_effect() {
+		let config = Config::default();
+		let ctx = Context::with_config(&config);
+		let solver = Solver::with_context(&ctx);
+
+		let lhs_program = &[Instruction::I32Const(1), Instruction::Nop];
+		let rhs_program = &[Instruction::I32Const(1)];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program));
+		let lhs_state = State::new(&ctx, &solver, &constants, "source-", lhs_program.len());
+		let rhs_state = State::new(&ctx, &solver, &constants, "target-", rhs_program.len());
+		lhs_state.set_source_program(lhs_program);
+		rhs_state.set_source_program(rhs_program);
+
+		for i in 0..lhs_program.len() {
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], lhs_state.transition(i)));
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], rhs_state.transition(i)));
+		}
+
+		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let s = equivalent_func.apply(&[constants.uint(2), constants.uint(1)]);
+		let evaled = model.eval(s);
+		let equiv: bool = evaled.try_into().unwrap();
+		assert!(equiv);
+	}
+
+	#[test]
+	fn equivalent_stack_unequal() {
+		let config = Config::default();
+		let ctx = Context::with_config(&config);
+		let solver = Solver::with_context(&ctx);
+
+		let lhs_program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
+		let rhs_program = &[Instruction::I32Const(2), Instruction::I32Const(1)];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program));
+		let lhs_state = State::new(&ctx, &solver, &constants, "source-", lhs_program.len());
+		let rhs_state = State::new(&ctx, &solver, &constants, "target-", rhs_program.len());
+		lhs_state.set_source_program(lhs_program);
+		rhs_state.set_source_program(rhs_program);
+
+		for i in 0..lhs_program.len() {
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], lhs_state.transition(i)));
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], rhs_state.transition(i)));
+		}
+
+		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let s = equivalent_func.apply(&[constants.uint(2), constants.uint(2)]);
+		let evaled = model.eval(s);
+		let equiv: bool = evaled.try_into().unwrap();
+		assert!(!equiv);
+	}
+
+	#[test]
+	fn equivalent_stack_pointer_unequal() {
+		let config = Config::default();
+		let ctx = Context::with_config(&config);
+		let solver = Solver::with_context(&ctx);
+
+		let lhs_program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
+		let rhs_program = &[Instruction::I32Const(1)];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program));
+		let lhs_state = State::new(&ctx, &solver, &constants, "source-", lhs_program.len());
+		let rhs_state = State::new(&ctx, &solver, &constants, "target-", rhs_program.len());
+		lhs_state.set_source_program(lhs_program);
+		rhs_state.set_source_program(rhs_program);
+
+		for i in 0..lhs_program.len() {
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], lhs_state.transition(i)));
+			solver.assert(ctx.forall_const(&constants.initial_stack[..], rhs_state.transition(i)));
+		}
+
+		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
+
+		assert!(solver.check());
+		let model = solver.model();
+
+		let s = equivalent_func.apply(&[constants.uint(2), constants.uint(1)]);
+		let evaled = model.eval(s);
+		let equiv: bool = evaled.try_into().unwrap();
+		assert!(!equiv);
 	}
 }
