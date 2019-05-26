@@ -369,10 +369,15 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let new_stack_pointer = self.stack_pointer(pc.clone() + self.constants.uint(1));
 
 		// instr == Nop
+		let definition = self
+			.transition_stack(pc.clone(), self.constants.instruction(&Instruction::Nop))
+			.eq(self.ctx.r#true());
+		self.solver.assert(self.ctx.forall_const(
+			&[pc.clone()],
+			self.ctx.implies(pc_in_range.clone(), definition),
+		));
 
 		// instr == Add implies stack(pc + 1, new_stack_pointer - 1) == stack(pc, stack_pointer - 1) + stack(pc, stack_pointer - 2)
-		let lhs = instr.eq(self.constants.instruction(&Instruction::I32Add));
-
 		let sum = self.ctx.bvadd(
 			self.stack(pc.clone(), stack_pointer.clone() - self.constants.int(1)),
 			self.stack(pc.clone(), stack_pointer.clone() - self.constants.int(2)),
@@ -383,28 +388,31 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				new_stack_pointer.clone() - self.constants.int(1),
 			)
 			.eq(sum);
-		let add_effect = self.ctx.implies(lhs, rhs);
+		let definition = self
+			.transition_stack(pc.clone(), self.constants.instruction(&Instruction::I32Add))
+			.eq(rhs);
+		self.solver.assert(self.ctx.forall_const(
+			&[pc.clone()],
+			self.ctx.implies(pc_in_range.clone(), definition),
+		));
 
 		// instr == Const implies stack(pc + 1, new_stack_pointer - 1) == consts(pc)
-		let lhs = instr.eq(self.constants.instruction(&Instruction::I32Const(0)));
 		let rhs = self
 			.stack(
 				pc.clone() + self.constants.uint(1),
 				new_stack_pointer - self.constants.int(1),
 			)
 			.eq(self.push_constants(pc.clone()));
-		let const_effect = self.ctx.implies(lhs, rhs);
-
-		let instruction_effect = self.ctx.and(&[add_effect, const_effect]);
-
 		let definition = self
-			.ctx
-			.iff(self.transition_stack(pc.clone(), instr), instruction_effect);
-
-		self.solver.assert(
-			self.ctx
-				.forall_const(&[pc], self.ctx.implies(pc_in_range, definition)),
-		);
+			.transition_stack(
+				pc.clone(),
+				self.constants.instruction(&Instruction::I32Const(0)),
+			)
+			.eq(rhs);
+		self.solver.assert(self.ctx.forall_const(
+			&[pc.clone()],
+			self.ctx.implies(pc_in_range.clone(), definition),
+		));
 	}
 
 	fn define_transition(&self) {
