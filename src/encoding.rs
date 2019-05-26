@@ -519,10 +519,19 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 	let lhs_pc = ctx.r#const(ctx.string_symbol("lhs_pc"), constants.int_sort);
 	let rhs_pc = ctx.r#const(ctx.string_symbol("rhs_pc"), constants.int_sort);
 
-	let lhs_program_length = constants.uint(lhs.program_length);
-	let lhs_pc_in_range = constants.in_range(constants.uint(0), lhs_pc.clone(), lhs_program_length);
-	let rhs_program_length = constants.uint(rhs.program_length);
-	let rhs_pc_in_range = constants.in_range(constants.uint(0), rhs_pc.clone(), rhs_program_length);
+	let lhs_pc_in_range = constants.in_range(
+		constants.uint(0),
+		lhs_pc.clone(),
+		// +1 to allow querying for the final state
+		constants.uint(lhs.program_length + 1),
+	);
+	let rhs_pc_in_range = constants.in_range(
+		constants.uint(0),
+		rhs_pc.clone(),
+		// +1 to allow querying for the final state
+		constants.uint(rhs.program_length + 1),
+	);
+	let pcs_in_range = ctx.and(&[lhs_pc_in_range, rhs_pc_in_range]);
 
 	let name = &(lhs.prefix.clone() + &rhs.prefix + "equivalent");
 	let equivalent_func = ctx.func_decl(
@@ -554,10 +563,10 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 		ctx.forall_const(&[n], ctx.implies(n_in_range, condition))
 	};
 
-	//	let bounds = ctx.and(&[lhs_pc_in_range, rhs_pc_in_range]);
 	let expected = equivalent_func.apply(&[lhs_pc.clone(), rhs_pc.clone()]);
 	let actual = ctx.and(&[stack_pointers_equal, stacks_equal]);
-	solver.assert(ctx.forall_const(&[lhs_pc, rhs_pc], expected.eq(actual)));
+	let equal = expected.eq(actual);
+	solver.assert(ctx.forall_const(&[lhs_pc, rhs_pc], ctx.implies(pcs_in_range, equal)));
 
 	equivalent_func
 }
