@@ -10,4 +10,4 @@ path = "src/main.rs"
 
 [dependencies]
 parity-wasm = "0.37.0"
-wassup-z3 = { path = "../wassup-z3" }
+z3 = { path = "../z3.rs/z3" }
