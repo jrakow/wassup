@@ -1073,4 +1073,11 @@ mod tests {
 		let target = superoptimize(source_program);
 		assert_eq!(target, vec![Instruction::I32Const(3)]);
 	}
+
+	#[test]
+	fn superoptimize_add() {
+		let source_program = &[Instruction::I32Const(0), Instruction::I32Add];
+		let target = superoptimize(source_program);
+		assert_eq!(target, vec![]);
+	}
 }
