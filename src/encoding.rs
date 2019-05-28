@@ -163,7 +163,7 @@ struct State<'ctx, 'solver, 'constants> {
 	// stack_pointer - 1 is top of stack
 	stack_pointer_func: FuncDecl<'ctx>,
 
-	program_length: usize,
+	program_length: Ast<'ctx>,
 	program_func: FuncDecl<'ctx>,
 	push_constants_func: FuncDecl<'ctx>,
 
@@ -179,7 +179,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		solver: &'solver Solver<'ctx>,
 		constants: &'constants Constants<'ctx, 'solver>,
 		prefix: &str,
-		program_length: usize,
 	) -> Self {
 		// declare stack function
 		let stack_func = ctx.func_decl(
@@ -210,6 +209,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&[&ctx.int_sort()],
 			&constants.word_sort,
 		);
+		// declare program length constant
+		let program_length = ctx.named_int_const(&(prefix.to_owned() + "program-length"));
 
 		// declare transition functions
 		let transition_func = ctx.func_decl(
@@ -242,9 +243,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			stack_func,
 			stack_pointer_func,
 
-			program_length,
 			program_func,
 			push_constants_func,
+			program_length,
 
 			transition_func,
 			transition_stack_pointer_func,
@@ -281,8 +282,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn set_source_program(&self, program: &[Instruction]) {
-		assert_eq!(self.program_length, program.len());
-
 		// set program_func to program
 		for (pc, instruction) in program.iter().enumerate() {
 			let instruction = self.constants.instruction(instruction);
@@ -300,15 +299,20 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 					.assert(&self.push_constants(&self.ctx.from_u64(pc as _))._eq(&i));
 			}
 		}
+
+		// set length
+		self.solver.assert(
+			&self
+				.program_length
+				._eq(&self.ctx.from_u64(program.len() as u64)),
+		)
 	}
 
 	fn define_transition_stack_pointer(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self.constants.in_range(
-			&self.ctx.from_u64(0),
-			&pc,
-			&self.ctx.from_u64(self.program_length as _),
-		);
+		let pc_in_range = self
+			.constants
+			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
 
 		// encode stack_pointer change
 		let stack_pointer = self.stack_pointer(&pc);
@@ -333,11 +337,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_transition_stack(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self.constants.in_range(
-			&self.ctx.from_u64(0),
-			&pc,
-			&self.ctx.from_u64(self.program_length as _),
-		);
+		let pc_in_range = self
+			.constants
+			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
 
 		// constants
 		let instr = self.program(&pc);
@@ -394,11 +396,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_transition(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self.constants.in_range(
-			&self.ctx.from_u64(0),
-			&pc,
-			&self.ctx.from_u64(self.program_length as _),
-		);
+		let pc_in_range = self
+			.constants
+			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
 
 		let definition = self.transition(&pc).iff(&self.preserve_stack(&pc).and(&[
 			&self.transition_stack_pointer(&pc),
@@ -414,11 +414,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_preserve_stack(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self.constants.in_range(
-			&self.ctx.from_u64(0),
-			&pc,
-			&self.ctx.from_u64(self.program_length as _),
-		);
+		let pc_in_range = self
+			.constants
+			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
 
 		// constants
 		let instr = self.program(&pc);
@@ -494,13 +492,13 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 		&ctx.from_u64(0),
 		&lhs_pc,
 		// +1 to allow querying for the final state
-		&ctx.from_u64(lhs.program_length as u64 + 1),
+		&lhs.program_length.add(&[&ctx.from_u64(1)]),
 	);
 	let rhs_pc_in_range = constants.in_range(
 		&ctx.from_u64(0),
 		&rhs_pc,
 		// +1 to allow querying for the final state
-		&ctx.from_u64(rhs.program_length as u64 + 1),
+		&rhs.program_length.add(&[&ctx.from_u64(1)]),
 	);
 	let pcs_in_range = lhs_pc_in_range.and(&[&rhs_pc_in_range]);
 
@@ -552,8 +550,8 @@ pub fn superoptimize(source_program: &[Instruction]) -> Option<Vec<Instruction>>
 	let solver = Solver::new(&ctx);
 
 	let constants = Constants::new(&ctx, &solver, stack_depth(source_program) as usize);
-	let source_state = State::new(&ctx, &solver, &constants, "source-", source_program.len());
-	let target_state = State::new(&ctx, &solver, &constants, "target-", source_program.len());
+	let source_state = State::new(&ctx, &solver, &constants, "source-");
+	let target_state = State::new(&ctx, &solver, &constants, "target-");
 	source_state.set_source_program(source_program);
 
 	let source_len = source_program.len() as u64;
@@ -573,14 +571,14 @@ pub fn superoptimize(source_program: &[Instruction]) -> Option<Vec<Instruction>>
 	let equivalent_func = define_equivalent(&source_state, &target_state);
 	let equivalent = |i, j| equivalent_func.apply(&[i, j]);
 
-	let target_length = ctx.named_int_const("target-length");
+	let target_length = &target_state.program_length;
 	// force target program to be shorter
 	let target_length_in_range =
-		constants.in_range(&ctx.from_u64(0), &target_length, &ctx.from_u64(source_len));
+		constants.in_range(&ctx.from_u64(0), target_length, &ctx.from_u64(source_len));
 
 	let target_better = target_length_in_range.and(&[
 		&equivalent(&ctx.from_u64(0), &ctx.from_u64(0)),
-		&equivalent(&ctx.from_u64(source_len), &target_length),
+		&equivalent(&ctx.from_u64(source_len), target_length),
 	]);
 	solver.assert(&target_better);
 
@@ -590,7 +588,7 @@ pub fn superoptimize(source_program: &[Instruction]) -> Option<Vec<Instruction>>
 
 	let model = solver.get_model();
 
-	let target_length = model.eval(&target_length).unwrap().as_i64().unwrap();
+	let target_length = model.eval(target_length).unwrap().as_i64().unwrap();
 	let mut target_program = Vec::with_capacity(target_length as usize);
 
 	for i in 0..target_length {
@@ -709,7 +707,7 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 
@@ -737,7 +735,7 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 
@@ -761,7 +759,7 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
@@ -794,7 +792,7 @@ mod tests {
 		let program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 
@@ -817,7 +815,7 @@ mod tests {
 		let program = &[Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
@@ -857,7 +855,7 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
@@ -895,7 +893,7 @@ mod tests {
 		let program = &[Instruction::I32Add];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let state = State::new(&ctx, &solver, &constants, "", program.len());
+		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
@@ -939,8 +937,8 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let source_state = State::new(&ctx, &solver, &constants, "source-", program.len());
-		let target_state = State::new(&ctx, &solver, &constants, "target-", program.len());
+		let source_state = State::new(&ctx, &solver, &constants, "source-");
+		let target_state = State::new(&ctx, &solver, &constants, "target-");
 
 		source_state.set_source_program(program);
 		target_state.set_source_program(program);
@@ -982,8 +980,8 @@ mod tests {
 		let rhs_program = &[Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source-", lhs_program.len());
-		let rhs_state = State::new(&ctx, &solver, &constants, "target-", rhs_program.len());
+		let lhs_state = State::new(&ctx, &solver, &constants, "source-");
+		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
@@ -1020,8 +1018,8 @@ mod tests {
 		let rhs_program = &[Instruction::I32Const(2), Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source-", lhs_program.len());
-		let rhs_state = State::new(&ctx, &solver, &constants, "target-", rhs_program.len());
+		let lhs_state = State::new(&ctx, &solver, &constants, "source-");
+		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
@@ -1058,8 +1056,8 @@ mod tests {
 		let rhs_program = &[Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source-", lhs_program.len());
-		let rhs_state = State::new(&ctx, &solver, &constants, "target-", rhs_program.len());
+		let lhs_state = State::new(&ctx, &solver, &constants, "source-");
+		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
