@@ -556,7 +556,7 @@ fn gas_particle_cost(_: &Instruction) -> usize {
 	1
 }
 
-pub fn superoptimize(source_program: &[Instruction]) -> Option<Vec<Instruction>> {
+pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 	let config = Config::default();
 	let ctx = Context::new(&config);
 	let solver = Solver::new(&ctx);
@@ -573,57 +573,74 @@ pub fn superoptimize(source_program: &[Instruction]) -> Option<Vec<Instruction>>
 	target_state.assert_transitions();
 
 	let equivalent_func = define_equivalent(&source_state, &target_state);
-	let equivalent = |i, j| equivalent_func.apply(&[i, j]);
+
+	// start equivalent
+	solver.assert(&equivalent_func.apply(&[&ctx.from_u64(0), &ctx.from_u64(0)]));
 
 	let target_length = &target_state.program_length;
-	// force target program to be shorter
-	let target_length_in_range =
-		constants.in_range(&ctx.from_u64(0), target_length, &ctx.from_u64(source_len));
 
-	let target_better = target_length_in_range.and(&[
-		&equivalent(&ctx.from_u64(0), &ctx.from_u64(0)),
-		&equivalent(&ctx.from_u64(source_len), target_length),
-	]);
-	solver.assert(&target_better);
+	let mut current_best = source_program.to_vec();
 
-	if !solver.check() {
-		return None;
-	}
+	loop {
+		solver.push();
 
-	let model = solver.get_model();
+		let source_len = current_best.len() as u64;
 
-	let target_length = model.eval(target_length).unwrap().as_i64().unwrap();
-	let mut target_program = Vec::with_capacity(target_length as usize);
+		// force target program to be shorter
+		solver.assert(&constants.in_range(
+			&ctx.from_u64(0),
+			target_length,
+			&ctx.from_u64(source_len),
+		));
+		// assert programs are equivalent
+		solver.assert(&equivalent_func.apply(&[&ctx.from_u64(source_len), &target_length]));
 
-	for i in 0..target_length {
-		let encoded_instr = model.eval(&target_state.program(&ctx.from_i64(i))).unwrap();
+		if !solver.check() {
+			// already optimal
+			return current_best;
+		}
 
-		for instr in iter_intructions() {
-			let equal_tester = &constants.instruction_testers[instruction_to_index(instr)];
-			let equal = model
-				.eval(&equal_tester.apply(&[&encoded_instr]))
-				.unwrap()
-				.as_bool()
-				.unwrap();
+		// better version found
+		// decode
 
-			if equal {
-				let decoded = if let Instruction::I32Const(_) = instr {
-					let push_constant_ast = target_state.push_constants(&ctx.from_i64(i));
-					let push_constant = model.eval(&push_constant_ast).unwrap().as_i64().unwrap();
-					// TODO fix cast
-					Instruction::I32Const(push_constant as i32)
-				} else {
-					instr.clone()
-				};
+		let model = solver.get_model();
 
-				target_program.push(decoded);
+		let target_length = model.eval(target_length).unwrap().as_i64().unwrap();
+		let mut target_program = Vec::with_capacity(target_length as usize);
 
-				break;
+		for i in 0..target_length {
+			let encoded_instr = model.eval(&target_state.program(&ctx.from_i64(i))).unwrap();
+
+			for instr in iter_intructions() {
+				let equal_tester = &constants.instruction_testers[instruction_to_index(instr)];
+				let equal = model
+					.eval(&equal_tester.apply(&[&encoded_instr]))
+					.unwrap()
+					.as_bool()
+					.unwrap();
+
+				if equal {
+					let decoded = if let Instruction::I32Const(_) = instr {
+						let push_constant_ast = target_state.push_constants(&ctx.from_i64(i));
+						let push_constant =
+							model.eval(&push_constant_ast).unwrap().as_i64().unwrap();
+						// TODO fix cast
+						Instruction::I32Const(push_constant as i32)
+					} else {
+						instr.clone()
+					};
+
+					target_program.push(decoded);
+
+					break;
+				}
 			}
 		}
-	}
 
-	Some(target_program)
+		current_best = target_program;
+
+		solver.pop(1);
+	}
 }
 
 #[cfg(test)]
@@ -1042,7 +1059,7 @@ mod tests {
 	#[test]
 	fn superoptimize_nop() {
 		let source_program = &[Instruction::I32Const(1), Instruction::Nop];
-		let target = superoptimize(source_program).unwrap();
+		let target = superoptimize(source_program);
 		assert_eq!(target, vec![Instruction::I32Const(1)]);
 	}
 
@@ -1053,7 +1070,7 @@ mod tests {
 			Instruction::I32Const(2),
 			Instruction::I32Add,
 		];
-		let target = superoptimize(source_program).unwrap();
+		let target = superoptimize(source_program);
 		assert_eq!(target, vec![Instruction::I32Const(3)]);
 	}
 }
