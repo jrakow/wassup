@@ -447,6 +447,18 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		);
 	}
 
+	fn assert_transitions(&self) {
+		let pc = self.ctx.named_int_const("pc");
+		let pc_in_range = self
+			.constants
+			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
+
+		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
+		bounds.push(&pc);
+		self.solver
+			.assert(&self.ctx.forall_const(&bounds, &self.transition(&pc)));
+	}
+
 	fn transition(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		self.transition_func.apply(&[pc])
 	}
@@ -557,16 +569,8 @@ pub fn superoptimize(source_program: &[Instruction]) -> Option<Vec<Instruction>>
 	let source_len = source_program.len() as u64;
 	let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-	for i in 0..source_len {
-		solver.assert(&ctx.forall_const(
-			&initial_stack,
-			&source_state.transition(&ctx.from_u64(i as u64)),
-		));
-		solver.assert(&ctx.forall_const(
-			&initial_stack,
-			&target_state.transition(&ctx.from_u64(i as u64)),
-		));
-	}
+	source_state.assert_transitions();
+	target_state.assert_transitions();
 
 	let equivalent_func = define_equivalent(&source_state, &target_state);
 	let equivalent = |i, j| equivalent_func.apply(&[i, j]);
@@ -764,12 +768,7 @@ mod tests {
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..program.len() {
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&state.transition_stack_pointer(&ctx.from_u64(i as u64)),
-			));
-		}
+		state.assert_transitions();
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -820,11 +819,7 @@ mod tests {
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..program.len() {
-			solver.assert(
-				&ctx.forall_const(&initial_stack, &state.transition(&ctx.from_u64(i as u64))),
-			);
-		}
+		state.assert_transitions();
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -860,11 +855,7 @@ mod tests {
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..program.len() {
-			solver.assert(
-				&ctx.forall_const(&initial_stack, &state.transition(&ctx.from_u64(i as u64))),
-			);
-		}
+		state.assert_transitions();
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -898,11 +889,7 @@ mod tests {
 		state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..program.len() {
-			solver.assert(
-				&ctx.forall_const(&initial_stack, &state.transition(&ctx.from_u64(i as u64))),
-			);
-		}
+		state.assert_transitions();
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -944,16 +931,8 @@ mod tests {
 		target_state.set_source_program(program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..program.len() {
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&source_state.transition(&ctx.from_u64(i as u64)),
-			));
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&target_state.transition(&ctx.from_u64(i as u64)),
-			));
-		}
+		source_state.assert_transitions();
+		target_state.assert_transitions();
 
 		let equivalent_func = define_equivalent(&source_state, &target_state);
 
@@ -986,16 +965,8 @@ mod tests {
 		rhs_state.set_source_program(rhs_program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..lhs_program.len() {
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&lhs_state.transition(&ctx.from_u64(i as u64)),
-			));
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&rhs_state.transition(&ctx.from_u64(i as u64)),
-			));
-		}
+		lhs_state.assert_transitions();
+		rhs_state.assert_transitions();
 
 		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
 
@@ -1024,16 +995,8 @@ mod tests {
 		rhs_state.set_source_program(rhs_program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..lhs_program.len() {
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&lhs_state.transition(&ctx.from_u64(i as u64)),
-			));
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&rhs_state.transition(&ctx.from_u64(i as u64)),
-			));
-		}
+		lhs_state.assert_transitions();
+		rhs_state.assert_transitions();
 
 		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
 
@@ -1062,16 +1025,8 @@ mod tests {
 		rhs_state.set_source_program(rhs_program);
 		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
-		for i in 0..lhs_program.len() {
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&lhs_state.transition(&ctx.from_u64(i as u64)),
-			));
-			solver.assert(&ctx.forall_const(
-				&initial_stack,
-				&rhs_state.transition(&ctx.from_u64(i as u64)),
-			));
-		}
+		lhs_state.assert_transitions();
+		rhs_state.assert_transitions();
 
 		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
 
