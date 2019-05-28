@@ -32,11 +32,12 @@ fn iter_intructions() -> impl Iterator<Item = &'static Instruction> {
 }
 
 fn stack_depth(program: &[Instruction]) -> u64 {
-	let mut stack_pointer = 0;
+	let mut stack_pointer: isize = 0;
 	let mut lowest: isize = 0;
 	for i in program {
 		let (pops, pushs) = stack_pop_push_count(i);
-		lowest = std::cmp::min(lowest, stack_pointer as isize - pops as isize);
+		let (pops, pushs) = (pops as isize, pushs as isize);
+		lowest = std::cmp::min(lowest, stack_pointer - pops);
 		stack_pointer = stack_pointer - pops + pushs;
 	}
 	lowest.abs().try_into().unwrap()
