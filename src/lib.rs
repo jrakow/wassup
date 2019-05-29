@@ -4,6 +4,8 @@ use parity_wasm::elements::Instruction;
 mod block;
 mod encoding;
 
+pub use parity_wasm;
+
 pub fn superoptimize_instructions(source_program: &[Instruction]) -> Vec<Instruction> {
 	encoding::superoptimize(source_program)
 }
