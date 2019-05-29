@@ -584,16 +584,16 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 	loop {
 		solver.push();
 
-		let source_len = current_best.len() as u64;
-
-		// force target program to be shorter
+		// force target program to be shorter than current best
 		solver.assert(&constants.in_range(
 			&ctx.from_u64(0),
 			target_length,
-			&ctx.from_u64(source_len),
+			&ctx.from_u64(current_best.len() as u64),
 		));
 		// assert programs are equivalent
-		solver.assert(&equivalent_func.apply(&[&ctx.from_u64(source_len), &target_length]));
+		solver.assert(
+			&equivalent_func.apply(&[&ctx.from_u64(source_program.len() as u64), &target_length]),
+		);
 
 		if !solver.check() {
 			// already optimal
