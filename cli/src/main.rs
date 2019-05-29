@@ -2,7 +2,7 @@ use clap::{crate_authors, crate_description, crate_version, App, Arg, ArgMatches
 use std::{
 	ffi::OsStr,
 	fs::File,
-	io::{stdout, Read, Write},
+	io::{stdin, stdout, Read, Write},
 	path::Path,
 	process::exit,
 };
@@ -15,9 +15,14 @@ fn main() {
 		.author(crate_authors!("\n"))
 		.about(crate_description!())
 		.arg(
+			Arg::with_name("STDIN")
+				.long("--stdin")
+				.help("Read the input from stdin"),
+		)
+		.arg(
 			Arg::with_name("INPUT")
-				.help("The input file to optimize")
-				.required(true)
+				.help("Input file to optimize")
+				.required_unless("STDIN")
 				.index(1),
 		)
 		.arg(
@@ -41,9 +46,13 @@ fn main() {
 
 fn rmain(args: ArgMatches) -> Result<(), String> {
 	let mut input_module: Module = {
-		let path = args.value_of("INPUT").unwrap();
-		let mut input_file = File::open(path)
-			.map_err(|e: std::io::Error| format!("Could not open input file: {}", e.to_string()))?;
+		let mut input_file: Box<dyn Read> = if let Some(path) = args.value_of("INPUT") {
+			Box::new(File::open(path).map_err(|e: std::io::Error| {
+				format!("Could not open input file: {}", e.to_string())
+			})?)
+		} else {
+			Box::new(stdin())
+		};
 
 		let mut buffer = Vec::new();
 		input_file
