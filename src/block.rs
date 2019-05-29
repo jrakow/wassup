@@ -1,6 +1,5 @@
 use parity_wasm::elements::BlockType;
 use parity_wasm::elements::Instruction;
-use std::mem::replace;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Block {
@@ -18,6 +17,7 @@ pub enum Block {
 		inner_true: Vec<Block>,
 		inner_false: Vec<Block>,
 	},
+	Unencodable(Instruction),
 }
 
 impl Block {
@@ -55,6 +55,9 @@ impl Block {
 				}
 				acc.push(Instruction::End);
 			}
+			Unencodable(i) => {
+				acc.push(i.clone());
+			}
 		}
 	}
 }
@@ -64,82 +67,98 @@ pub fn serialize(blocks: &[Block]) -> Vec<Instruction> {
 	for b in blocks {
 		b.serialize(&mut v);
 	}
+	v.push(Instruction::End);
 	v
 }
 
-fn instruction_starts_block(i: &Instruction) -> bool {
+fn instruction_ends_block(i: &Instruction) -> bool {
 	match i {
-		Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => true,
+		Instruction::Else | Instruction::End => true,
 		_ => false,
 	}
 }
 
-pub fn split_into_blocks(source: &[Instruction]) -> (Vec<Block>, &[Instruction]) {
-	let mut source = source;
-	let mut blocks = vec![];
-
-	// if the current block is flat, instructions of current block
-	let mut ins = vec![];
-
-	while !source.is_empty() {
-		let i = &source[0];
-		source = &source[1..];
-		if !ins.is_empty() && instruction_starts_block(i) {
-			blocks.push(Block::Flat(replace(&mut ins, vec![])));
-		}
-
-		match i {
-			Instruction::Block(ty) => {
-				let (inner, rest) = split_into_blocks(source);
-				source = rest;
-				blocks.push(Block::BlockIns { ty: *ty, inner });
-			}
-			Instruction::Loop(ty) => {
-				let (inner, rest) = split_into_blocks(source);
-				source = rest;
-				blocks.push(Block::LoopIns { ty: *ty, inner });
-			}
-			Instruction::If(ty) => {
-				let (inner_true, rest) = split_into_blocks(source);
-				source = rest;
-				let (inner_false, rest) = split_into_blocks(source);
-				source = rest;
-				blocks.push(Block::IfIns {
-					ty: *ty,
-					inner_true,
-					inner_false,
-				});
-			}
-			Instruction::Else | Instruction::End => {
-				break;
-			}
-			Instruction::Unreachable => {
-				ins.push(i.clone());
-				break;
-			}
-			Instruction::Br(_)
-			| Instruction::BrIf(_)
-			| Instruction::BrTable(_)
-			| Instruction::Return
-			| Instruction::Call(_)
-			| Instruction::CallIndirect(..) => unimplemented!(),
-			_ => {
-				ins.push(i.clone());
-			}
-		}
+fn instruction_encodable(i: &Instruction) -> bool {
+	match i {
+		Instruction::I32Const(_) | Instruction::Nop | Instruction::I32Add => true,
+		_ => false,
 	}
-
-	if !ins.is_empty() {
-		blocks.push(Block::Flat(ins));
-	}
-
-	(blocks, source)
 }
 
-pub fn blocks(source: &[Instruction]) -> Vec<Block> {
-	let (blocks, rest) = split_into_blocks(source);
-	assert!(rest.is_empty());
-	blocks
+struct ParseState<'i> {
+	rest: &'i [Instruction],
+}
+
+impl<'i> ParseState<'i> {
+	fn new(source: &'i [Instruction]) -> Self {
+		Self { rest: source }
+	}
+
+	fn peek(&self) -> &'i Instruction {
+		&self.rest[0]
+	}
+
+	fn advance(&mut self) -> &'i Instruction {
+		let (i, rest) = self.rest.split_first().unwrap();
+		self.rest = rest;
+		i
+	}
+
+	// Parses a Block::Flat
+	fn parse_flat(&mut self) -> Block {
+		let mut acc = vec![];
+
+		while !self.rest.is_empty() {
+			match self.peek() {
+				i if instruction_encodable(i) => acc.push(self.advance().clone()),
+				_ => return Block::Flat(acc),
+			}
+		}
+
+		unreachable!();
+	}
+
+	// Parses a Block
+	fn parse_blocks(&mut self) -> Vec<Block> {
+		let mut acc = vec![];
+
+		while !self.rest.is_empty() {
+			let next_block = match self.peek() {
+				i if instruction_ends_block(i) => {
+					self.advance();
+					return acc;
+				}
+				Instruction::Block(ty) => {
+					self.advance();
+					let inner = self.parse_blocks();
+					Block::BlockIns { ty: *ty, inner }
+				}
+				Instruction::Loop(ty) => {
+					self.advance();
+					let inner = self.parse_blocks();
+					Block::LoopIns { ty: *ty, inner }
+				}
+				Instruction::If(ty) => {
+					self.advance();
+					let inner_true = self.parse_blocks();
+					let inner_false = self.parse_blocks();
+					Block::IfIns {
+						ty: *ty,
+						inner_true,
+						inner_false,
+					}
+				}
+				i if instruction_encodable(i) => self.parse_flat(),
+				_ => Block::Unencodable(self.advance().clone()),
+			};
+			acc.push(next_block);
+		}
+		unreachable!();
+	}
+}
+
+pub fn parse_blocks(source: &[Instruction]) -> Vec<Block> {
+	ParseState::new(source).parse_blocks()
 }
 
 fn flat_blocks_mut_impl<'a>(block: &'a mut Block, flat_blocks: &mut Vec<&'a mut Vec<Instruction>>) {
@@ -169,6 +188,7 @@ fn flat_blocks_mut_impl<'a>(block: &'a mut Block, flat_blocks: &mut Vec<&'a mut 
 				flat_blocks_mut_impl(b, flat_blocks);
 			}
 		}
+		Block::Unencodable(_) => {}
 	}
 }
 
@@ -188,25 +208,52 @@ mod tests {
 
 	#[test]
 	fn nothing_to_split() {
-		let source = &[Instruction::I32Add, Instruction::I32Sub, Instruction::Drop];
-		let expected = &[Block::Flat(vec![
+		let source = &[
 			Instruction::I32Add,
-			Instruction::I32Sub,
+			Instruction::I32Add,
 			Instruction::Drop,
-		])];
-		let (split, empty) = split_into_blocks(source);
-		assert!(empty.is_empty());
-		assert_eq!(expected[..], split[..]);
+			Instruction::End,
+		];
+		let expected = &[
+			Block::Flat(vec![Instruction::I32Add, Instruction::I32Add]),
+			Block::Unencodable(Instruction::Drop),
+		];
+		assert_eq!(expected[..], parse_blocks(source)[..]);
 		assert_eq!(source[..], serialize(expected)[..]);
 
-		let source = &[Instruction::I32Add, Instruction::Unreachable];
-		let expected = &[Block::Flat(vec![
+		let source = &[
 			Instruction::I32Add,
 			Instruction::Unreachable,
-		])];
-		let (split, empty) = split_into_blocks(source);
-		assert!(empty.is_empty());
-		assert_eq!(expected[..], split[..]);
+			Instruction::End,
+		];
+		let expected = &[
+			Block::Flat(vec![Instruction::I32Add]),
+			Block::Unencodable(Instruction::Unreachable),
+		];
+		assert_eq!(expected[..], parse_blocks(source)[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
+	}
+
+	#[test]
+	fn empty() {
+		let source = &[Instruction::End];
+		let expected = &[];
+		assert_eq!(expected[..], parse_blocks(source)[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
+	}
+
+	#[test]
+	fn end_at_end() {
+		let source = &[
+			Instruction::I32Add,
+			Instruction::Unreachable,
+			Instruction::End,
+		];
+		let expected = &[
+			Block::Flat(vec![Instruction::I32Add]),
+			Block::Unencodable(Instruction::Unreachable),
+		];
+		assert_eq!(expected[..], parse_blocks(source)[..]);
 		assert_eq!(source[..], serialize(expected)[..]);
 	}
 
@@ -216,14 +263,13 @@ mod tests {
 			Instruction::Block(BlockType::NoResult),
 			Instruction::I32Add,
 			Instruction::End,
+			Instruction::End,
 		];
 		let expected = &[Block::BlockIns {
 			ty: BlockType::NoResult,
 			inner: vec![Block::Flat(vec![Instruction::I32Add])],
 		}];
-		let (split, empty) = split_into_blocks(source);
-		assert!(empty.is_empty());
-		assert_eq!(expected[..], split[..]);
+		assert_eq!(expected[..], parse_blocks(source)[..]);
 		assert_eq!(source[..], serialize(expected)[..]);
 
 		let source = &[
@@ -231,7 +277,8 @@ mod tests {
 			Instruction::Block(BlockType::NoResult),
 			Instruction::I32Add,
 			Instruction::End,
-			Instruction::I32Sub,
+			Instruction::I32Add,
+			Instruction::End,
 		];
 		let expected = &[
 			Block::Flat(vec![Instruction::I32Add]),
@@ -239,11 +286,9 @@ mod tests {
 				ty: BlockType::NoResult,
 				inner: vec![Block::Flat(vec![Instruction::I32Add])],
 			},
-			Block::Flat(vec![Instruction::I32Sub]),
+			Block::Flat(vec![Instruction::I32Add]),
 		];
-		let (split, empty) = split_into_blocks(source);
-		assert!(empty.is_empty());
-		assert_eq!(expected[..], split[..]);
+		assert_eq!(expected[..], parse_blocks(source)[..]);
 		assert_eq!(source[..], serialize(expected)[..]);
 	}
 
@@ -251,42 +296,40 @@ mod tests {
 	fn if_then_else() {
 		let source = &[
 			Instruction::If(BlockType::NoResult),
-			Instruction::I32Sub,
+			Instruction::I32Add,
 			Instruction::Else,
 			Instruction::I32Add,
+			Instruction::End,
 			Instruction::End,
 		];
 		let expected = &[Block::IfIns {
 			ty: BlockType::NoResult,
-			inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
+			inner_true: vec![Block::Flat(vec![Instruction::I32Add])],
 			inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
 		}];
-		let (split, empty) = split_into_blocks(source);
-		assert!(empty.is_empty());
-		assert_eq!(expected[..], split[..]);
+		assert_eq!(expected[..], parse_blocks(source)[..]);
 		assert_eq!(source[..], serialize(expected)[..]);
 
 		let source = &[
 			Instruction::I32Add,
 			Instruction::If(BlockType::NoResult),
-			Instruction::I32Sub,
+			Instruction::I32Add,
 			Instruction::Else,
 			Instruction::I32Add,
 			Instruction::End,
-			Instruction::I32Sub,
+			Instruction::I32Add,
+			Instruction::End,
 		];
 		let expected = &[
 			Block::Flat(vec![Instruction::I32Add]),
 			Block::IfIns {
 				ty: BlockType::NoResult,
-				inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
+				inner_true: vec![Block::Flat(vec![Instruction::I32Add])],
 				inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
 			},
-			Block::Flat(vec![Instruction::I32Sub]),
+			Block::Flat(vec![Instruction::I32Add]),
 		];
-		let (split, empty) = split_into_blocks(source);
-		assert!(empty.is_empty());
-		assert_eq!(expected[..], split[..]);
+		assert_eq!(expected[..], parse_blocks(source)[..]);
 		assert_eq!(source[..], serialize(expected)[..]);
 	}
 
@@ -296,10 +339,10 @@ mod tests {
 			Block::Flat(vec![Instruction::I32Add]),
 			Block::IfIns {
 				ty: BlockType::NoResult,
-				inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
+				inner_true: vec![Block::Flat(vec![Instruction::I32Add])],
 				inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
 			},
-			Block::Flat(vec![Instruction::I32Sub]),
+			Block::Flat(vec![Instruction::I32Add]),
 		];
 		let flat_blocks = flat_blocks_mut(&mut blocks);
 		let flat_blocks_copy: Vec<Vec<Instruction>> =
@@ -307,9 +350,9 @@ mod tests {
 		assert_eq!(
 			vec![
 				vec![Instruction::I32Add],
-				vec![Instruction::I32Sub],
 				vec![Instruction::I32Add],
-				vec![Instruction::I32Sub],
+				vec![Instruction::I32Add],
+				vec![Instruction::I32Add],
 			],
 			flat_blocks_copy
 		);

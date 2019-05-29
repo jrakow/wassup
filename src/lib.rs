@@ -12,7 +12,7 @@ pub fn superoptimize_instructions(source_program: &[Instruction]) -> Vec<Instruc
 
 pub fn superoptimize_func_body(func_body: &mut parity_wasm::elements::FuncBody) {
 	let code = func_body.code_mut().elements_mut();
-	let mut blocks = block::blocks(code);
+	let mut blocks = block::parse_blocks(code);
 	let flat_blocks = flat_blocks_mut(&mut blocks);
 	for flat_block in flat_blocks {
 		let instructions = &flat_block[..];

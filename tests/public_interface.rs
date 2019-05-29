@@ -19,6 +19,9 @@ fn module_consts_add() {
 	wassup::superoptimize_module(&mut module);
 
 	let func_body = &module.code_section().unwrap().bodies()[0];
-	assert_eq!(func_body.code().elements(), &[Instruction::I32Const(3)]);
+	assert_eq!(
+		func_body.code().elements(),
+		&[Instruction::I32Const(3), Instruction::End]
+	);
 	assert!(func_body.locals().is_empty());
 }
