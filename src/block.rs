@@ -20,6 +20,53 @@ pub enum Block {
 	},
 }
 
+impl Block {
+	pub fn serialize(&self, acc: &mut Vec<Instruction>) {
+		use crate::block::Block::*;
+
+		match self {
+			Flat(v) => acc.extend_from_slice(v),
+			BlockIns { ty, inner } => {
+				acc.push(Instruction::Block(*ty));
+				for i in inner {
+					i.serialize(acc);
+				}
+				acc.push(Instruction::End);
+			}
+			LoopIns { ty, inner } => {
+				acc.push(Instruction::Loop(*ty));
+				for i in inner {
+					i.serialize(acc);
+				}
+				acc.push(Instruction::End);
+			}
+			IfIns {
+				ty,
+				inner_true,
+				inner_false,
+			} => {
+				acc.push(Instruction::If(*ty));
+				for i in inner_true {
+					i.serialize(acc);
+				}
+				acc.push(Instruction::Else);
+				for i in inner_false {
+					i.serialize(acc);
+				}
+				acc.push(Instruction::End);
+			}
+		}
+	}
+}
+
+pub fn serialize(blocks: &[Block]) -> Vec<Instruction> {
+	let mut v = vec![];
+	for b in blocks {
+		b.serialize(&mut v);
+	}
+	v
+}
+
 fn instruction_starts_block(i: &Instruction) -> bool {
 	match i {
 		Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => true,
@@ -150,6 +197,7 @@ mod tests {
 		let (split, empty) = split_into_blocks(source);
 		assert!(empty.is_empty());
 		assert_eq!(expected[..], split[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
 
 		let source = &[Instruction::I32Add, Instruction::Unreachable];
 		let expected = &[Block::Flat(vec![
@@ -159,6 +207,7 @@ mod tests {
 		let (split, empty) = split_into_blocks(source);
 		assert!(empty.is_empty());
 		assert_eq!(expected[..], split[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
 	}
 
 	#[test]
@@ -175,6 +224,7 @@ mod tests {
 		let (split, empty) = split_into_blocks(source);
 		assert!(empty.is_empty());
 		assert_eq!(expected[..], split[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
 
 		let source = &[
 			Instruction::I32Add,
@@ -194,6 +244,7 @@ mod tests {
 		let (split, empty) = split_into_blocks(source);
 		assert!(empty.is_empty());
 		assert_eq!(expected[..], split[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
 	}
 
 	#[test]
@@ -213,6 +264,7 @@ mod tests {
 		let (split, empty) = split_into_blocks(source);
 		assert!(empty.is_empty());
 		assert_eq!(expected[..], split[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
 
 		let source = &[
 			Instruction::I32Add,
@@ -235,6 +287,7 @@ mod tests {
 		let (split, empty) = split_into_blocks(source);
 		assert!(empty.is_empty());
 		assert_eq!(expected[..], split[..]);
+		assert_eq!(source[..], serialize(expected)[..]);
 	}
 
 	#[test]
