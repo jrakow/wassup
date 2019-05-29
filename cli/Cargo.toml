@@ -1,5 +1,6 @@
 [package]
 name = "wassup-cli"
+description = "A WebAssembly Superoptimizer"
 version = "0.1.0"
 authors = ["Julius Rakow <julius@rakow.me>"]
 edition = "2018"
@@ -9,4 +10,6 @@ name = "wassup"
 path = "src/main.rs"
 
 [dependencies]
+clap = "2.33.0"
+wabt = "0.7.4"
 wassup = { path = ".." }
