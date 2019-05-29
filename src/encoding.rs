@@ -43,10 +43,7 @@ fn stack_depth(program: &[Instruction]) -> u64 {
 	lowest.abs().try_into().unwrap()
 }
 
-struct Constants<'ctx, 'solver> {
-	ctx: &'ctx Context,
-	solver: &'solver Solver<'ctx>,
-
+struct Constants<'ctx> {
 	word_sort: Sort<'ctx>,
 	instruction_sort: Sort<'ctx>,
 	instruction_consts: Vec<FuncDecl<'ctx>>,
@@ -58,10 +55,8 @@ struct Constants<'ctx, 'solver> {
 	stack_depth: usize,
 }
 
-impl<'ctx, 'solver> Constants<'ctx, 'solver> {
-	fn new(ctx: &'ctx Context, solver: &'solver Solver<'ctx>, stack_depth: usize) -> Self {
-		use Instruction::*;
-
+impl<'ctx, 'solver> Constants<'ctx> {
+	fn new(ctx: &'ctx Context, solver: &Solver<'ctx>, stack_depth: usize) -> Self {
 		let word_sort = ctx.bitvector_sort(32);
 		let (instruction_sort, instruction_consts, instruction_testers) = ctx.enumeration_sort(
 			&ctx.str_sym("instruction-sort"),
@@ -72,7 +67,7 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 			],
 		);
 		let initial_stack: Vec<_> = (0..stack_depth)
-			.map(|i| ctx.fresh_const("initial-stack", &word_sort))
+			.map(|_| ctx.fresh_const("initial-stack", &word_sort))
 			.collect();
 
 		let stack_pop_count_func = ctx.func_decl(
@@ -92,8 +87,6 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 		);
 
 		let constants = Constants {
-			ctx,
-			solver,
 			word_sort,
 			instruction_sort,
 			instruction_consts,
@@ -155,7 +148,7 @@ impl<'ctx, 'solver> Constants<'ctx, 'solver> {
 struct State<'ctx, 'solver, 'constants> {
 	ctx: &'ctx Context,
 	solver: &'solver Solver<'ctx>,
-	constants: &'constants Constants<'ctx, 'solver>,
+	constants: &'constants Constants<'ctx>,
 
 	prefix: String,
 
@@ -177,7 +170,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn new(
 		ctx: &'ctx Context,
 		solver: &'solver Solver<'ctx>,
-		constants: &'constants Constants<'ctx, 'solver>,
+		constants: &'constants Constants<'ctx>,
 		prefix: &str,
 	) -> Self {
 		// declare stack function
@@ -342,7 +335,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
 
 		// constants
-		let instr = self.program(&pc);
 		let stack_pointer = self.stack_pointer(&pc);
 
 		// encode instruction effect
@@ -555,10 +547,6 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 	equivalent_func
 }
 
-fn gas_particle_cost(_: &Instruction) -> usize {
-	1
-}
-
 pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 	let config = Config::default();
 	let ctx = Context::new(&config);
@@ -568,9 +556,6 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 	let source_state = State::new(&ctx, &solver, &constants, "source-");
 	let target_state = State::new(&ctx, &solver, &constants, "target-");
 	source_state.set_source_program(source_program);
-
-	let source_len = source_program.len() as u64;
-	let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 	source_state.assert_transitions();
 	target_state.assert_transitions();
@@ -786,7 +771,6 @@ mod tests {
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		state.assert_transitions();
 
@@ -837,7 +821,6 @@ mod tests {
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		state.assert_transitions();
 
@@ -873,17 +856,11 @@ mod tests {
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		state.assert_transitions();
 
 		assert!(solver.check());
 		let model = solver.get_model();
-
-		let eval_int = |ast| -> i64 {
-			let evaled = model.eval(ast).unwrap();
-			evaled.as_i64().unwrap()
-		};
 
 		let eval_bv = |ast: &Ast| -> i64 {
 			let evaled = model.eval(&ast.bv2int(true)).unwrap();
@@ -907,17 +884,11 @@ mod tests {
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		state.assert_transitions();
 
 		assert!(solver.check());
 		let model = solver.get_model();
-
-		let eval_int = |ast| -> i64 {
-			let evaled = model.eval(ast).unwrap();
-			evaled.as_i64().unwrap()
-		};
 
 		let eval_bv = |ast: &Ast| -> i64 {
 			let evaled = model.eval(&ast.bv2int(true)).unwrap();
@@ -949,7 +920,6 @@ mod tests {
 
 		source_state.set_source_program(program);
 		target_state.set_source_program(program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		source_state.assert_transitions();
 		target_state.assert_transitions();
@@ -983,7 +953,6 @@ mod tests {
 		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		lhs_state.assert_transitions();
 		rhs_state.assert_transitions();
@@ -1013,7 +982,6 @@ mod tests {
 		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		lhs_state.assert_transitions();
 		rhs_state.assert_transitions();
@@ -1043,7 +1011,6 @@ mod tests {
 		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
-		let initial_stack: Vec<_> = constants.initial_stack.iter().collect();
 
 		lhs_state.assert_transitions();
 		rhs_state.assert_transitions();
