@@ -147,20 +147,20 @@ fn flat_blocks_mut_impl<'a>(block: &'a mut Block, flat_blocks: &mut Vec<&'a mut 
 		Block::Flat(ins) => {
 			flat_blocks.push(ins);
 		}
-		Block::BlockIns { ty: _, inner } => {
+		Block::BlockIns { inner, .. } => {
 			for b in inner {
 				flat_blocks_mut_impl(b, flat_blocks);
 			}
 		}
-		Block::LoopIns { ty: _, inner } => {
+		Block::LoopIns { inner, .. } => {
 			for b in inner {
 				flat_blocks_mut_impl(b, flat_blocks);
 			}
 		}
 		Block::IfIns {
-			ty: _,
 			inner_true,
 			inner_false,
+			..
 		} => {
 			for b in inner_true {
 				flat_blocks_mut_impl(b, flat_blocks);
