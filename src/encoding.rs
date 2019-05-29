@@ -455,8 +455,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
 		bounds.push(&pc);
-		self.solver
-			.assert(&self.ctx.forall_const(&bounds, &self.transition(&pc)));
+		self.solver.assert(
+			&self
+				.ctx
+				.forall_const(&bounds, &pc_in_range.implies(&self.transition(&pc))),
+		);
 	}
 
 	fn transition(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
