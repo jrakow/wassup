@@ -141,111 +141,100 @@ mod tests {
 
 	#[test]
 	fn nothing_to_split() {
-		assert_eq!(
-			(
-				vec![Block::Flat(vec![
-					Instruction::I32Add,
-					Instruction::I32Sub,
-					Instruction::Drop
-				])],
-				&[][..]
-			),
-			split_into_blocks(&[Instruction::I32Add, Instruction::I32Sub, Instruction::Drop]),
-		);
+		let source = &[Instruction::I32Add, Instruction::I32Sub, Instruction::Drop];
+		let expected = &[Block::Flat(vec![
+			Instruction::I32Add,
+			Instruction::I32Sub,
+			Instruction::Drop,
+		])];
+		let (split, empty) = split_into_blocks(source);
+		assert!(empty.is_empty());
+		assert_eq!(expected[..], split[..]);
 
-		assert_eq!(
-			(
-				vec![Block::Flat(vec![
-					Instruction::I32Add,
-					Instruction::Unreachable
-				])],
-				&[][..]
-			),
-			split_into_blocks(&[Instruction::I32Add, Instruction::Unreachable]),
-		);
+		let source = &[Instruction::I32Add, Instruction::Unreachable];
+		let expected = &[Block::Flat(vec![
+			Instruction::I32Add,
+			Instruction::Unreachable,
+		])];
+		let (split, empty) = split_into_blocks(source);
+		assert!(empty.is_empty());
+		assert_eq!(expected[..], split[..]);
 	}
 
 	#[test]
 	fn block() {
-		assert_eq!(
-			(
-				vec![Block::BlockIns {
-					ty: BlockType::NoResult,
-					inner: vec![Block::Flat(vec![Instruction::I32Add])],
-				}],
-				&[][..]
-			),
-			split_into_blocks(&[
-				Instruction::Block(BlockType::NoResult),
-				Instruction::I32Add,
-				Instruction::End
-			]),
-		);
-		assert_eq!(
-			(
-				vec![
-					Block::Flat(vec![Instruction::I32Add]),
-					Block::BlockIns {
-						ty: BlockType::NoResult,
-						inner: vec![Block::Flat(vec![Instruction::I32Add])],
-					},
-					Block::Flat(vec![Instruction::I32Sub]),
-				],
-				&[][..]
-			),
-			split_into_blocks(&[
-				Instruction::I32Add,
-				Instruction::Block(BlockType::NoResult),
-				Instruction::I32Add,
-				Instruction::End,
-				Instruction::I32Sub
-			]),
-		);
+		let source = &[
+			Instruction::Block(BlockType::NoResult),
+			Instruction::I32Add,
+			Instruction::End,
+		];
+		let expected = &[Block::BlockIns {
+			ty: BlockType::NoResult,
+			inner: vec![Block::Flat(vec![Instruction::I32Add])],
+		}];
+		let (split, empty) = split_into_blocks(source);
+		assert!(empty.is_empty());
+		assert_eq!(expected[..], split[..]);
+
+		let source = &[
+			Instruction::I32Add,
+			Instruction::Block(BlockType::NoResult),
+			Instruction::I32Add,
+			Instruction::End,
+			Instruction::I32Sub,
+		];
+		let expected = &[
+			Block::Flat(vec![Instruction::I32Add]),
+			Block::BlockIns {
+				ty: BlockType::NoResult,
+				inner: vec![Block::Flat(vec![Instruction::I32Add])],
+			},
+			Block::Flat(vec![Instruction::I32Sub]),
+		];
+		let (split, empty) = split_into_blocks(source);
+		assert!(empty.is_empty());
+		assert_eq!(expected[..], split[..]);
 	}
 
 	#[test]
 	fn if_then_else() {
-		assert_eq!(
-			(
-				vec![Block::IfIns {
-					ty: BlockType::NoResult,
-					inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
-					inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
-				},],
-				&[][..]
-			),
-			split_into_blocks(&[
-				Instruction::If(BlockType::NoResult),
-				Instruction::I32Sub,
-				Instruction::Else,
-				Instruction::I32Add,
-				Instruction::End
-			]),
-		);
+		let source = &[
+			Instruction::If(BlockType::NoResult),
+			Instruction::I32Sub,
+			Instruction::Else,
+			Instruction::I32Add,
+			Instruction::End,
+		];
+		let expected = &[Block::IfIns {
+			ty: BlockType::NoResult,
+			inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
+			inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
+		}];
+		let (split, empty) = split_into_blocks(source);
+		assert!(empty.is_empty());
+		assert_eq!(expected[..], split[..]);
 
-		assert_eq!(
-			(
-				vec![
-					Block::Flat(vec![Instruction::I32Add]),
-					Block::IfIns {
-						ty: BlockType::NoResult,
-						inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
-						inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
-					},
-					Block::Flat(vec![Instruction::I32Sub]),
-				],
-				&[][..]
-			),
-			split_into_blocks(&[
-				Instruction::I32Add,
-				Instruction::If(BlockType::NoResult),
-				Instruction::I32Sub,
-				Instruction::Else,
-				Instruction::I32Add,
-				Instruction::End,
-				Instruction::I32Sub
-			]),
-		);
+		let source = &[
+			Instruction::I32Add,
+			Instruction::If(BlockType::NoResult),
+			Instruction::I32Sub,
+			Instruction::Else,
+			Instruction::I32Add,
+			Instruction::End,
+			Instruction::I32Sub,
+		];
+		let expected = &[
+			Block::Flat(vec![Instruction::I32Add]),
+			Block::IfIns {
+				ty: BlockType::NoResult,
+				inner_true: vec![Block::Flat(vec![Instruction::I32Sub])],
+				inner_false: vec![Block::Flat(vec![Instruction::I32Add])],
+			},
+			Block::Flat(vec![Instruction::I32Sub]),
+		];
+		let (split, empty) = split_into_blocks(source);
+		assert!(empty.is_empty());
+		assert_eq!(expected[..], split[..]);
 	}
 
 	#[test]
