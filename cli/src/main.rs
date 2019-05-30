@@ -60,7 +60,8 @@ fn rmain(args: ArgMatches) -> Result<(), String> {
 			.map_err(|e: std::io::Error| format!("Could not read input file: {}", e.to_string()))?;
 
 		if &buffer[0..4] != b"\0wasm" {
-			buffer = wat2wasm(&buffer).map_err(|_| "Could not read input as WAST".to_string())?;
+			buffer =
+				wat2wasm(&buffer).map_err(|_| "Could not parse input as WAT module".to_string())?;
 		}
 
 		deserialize_buffer(&buffer).map_err(|e: parity_wasm::elements::Error| {
@@ -74,11 +75,10 @@ fn rmain(args: ArgMatches) -> Result<(), String> {
 	let output_path = args.value_of("OUTPUT");
 
 	// detect output format
-	// wast iff stdout or (specified and ends in "wast")
-	if output_path == None
-		|| Path::new(output_path.unwrap()).extension() == Some(OsStr::new("wast"))
+	// wat iff stdout or (specified and ends in "wat")
+	if output_path == None || Path::new(output_path.unwrap()).extension() == Some(OsStr::new("wat"))
 	{
-		// wast
+		// wat
 		buffer = wabt::wasm2wat(&buffer).unwrap().as_bytes().to_vec();
 	}
 
