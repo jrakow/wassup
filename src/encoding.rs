@@ -265,56 +265,36 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			self.constants
 				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
-		// constants
-		let stack_pointer = self.stack_pointer(&pc);
+		let define_instruction = |i: &Instruction, ast: &Ast<'ctx>| {
+			let definition = self
+				.transition_stack(&pc, &self.constants.instruction(&i))
+				._eq(&ast);
+			self.solver.assert(
+				&self
+					.ctx
+					.forall_const(&[&pc], &pc_in_range.implies(&definition)),
+			);
+		};
 
-		// encode instruction effect
-		let new_stack_pointer = self.stack_pointer(&pc.add(&[&self.ctx.from_u64(1)]));
+		// constants
+		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
+		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
+		let result = self.stack(
+			&pc.add(&[&self.ctx.from_u64(1)]),
+			&self
+				.stack_pointer(&&pc.add(&[&self.ctx.from_u64(1)]))
+				.sub(&[&self.ctx.from_i64(1)]),
+		);
 
 		// instr == Nop
-		let definition = self
-			.transition_stack(&pc, &self.constants.instruction(&Instruction::Nop))
-			._eq(&self.ctx.from_bool(true));
-		self.solver.assert(
-			&self
-				.ctx
-				.forall_const(&[&pc], &pc_in_range.implies(&definition)),
+		define_instruction(&Instruction::Nop, &self.ctx.from_bool(true));
+
+		define_instruction(
+			&Instruction::I32Const(0),
+			&result._eq(&self.push_constants(&pc)),
 		);
 
-		// instr == Add implies stack(pc + 1, new_stack_pointer - 1) == stack(pc, stack_pointer - 1) + stack(pc, stack_pointer - 2)
-		let sum = self
-			.stack(&pc, &stack_pointer.sub(&[&self.ctx.from_i64(1)]))
-			.bvadd(&self.stack(&pc, &stack_pointer.sub(&[&self.ctx.from_i64(2)])));
-		let rhs = self
-			.stack(
-				&pc.add(&[&self.ctx.from_u64(1)]),
-				&new_stack_pointer.sub(&[&self.ctx.from_i64(1)]),
-			)
-			._eq(&sum);
-		let definition = self
-			.transition_stack(&pc, &self.constants.instruction(&Instruction::I32Add))
-			._eq(&rhs);
-		self.solver.assert(
-			&self
-				.ctx
-				.forall_const(&[&pc], &pc_in_range.implies(&definition)),
-		);
-
-		// instr == Const implies stack(pc + 1, new_stack_pointer - 1) == consts(pc)
-		let rhs = self
-			.stack(
-				&pc.add(&[&self.ctx.from_u64(1)]),
-				&new_stack_pointer.sub(&[&self.ctx.from_i64(1)]),
-			)
-			._eq(&self.push_constants(&pc));
-		let definition = self
-			.transition_stack(&pc, &self.constants.instruction(&Instruction::I32Const(0)))
-			._eq(&rhs);
-		self.solver.assert(
-			&self
-				.ctx
-				.forall_const(&[&pc], &pc_in_range.implies(&definition)),
-		);
+		define_instruction(&Instruction::I32Add, &result._eq(&op1.bvadd(&op2)));
 	}
 
 	fn define_transition(&self) {
