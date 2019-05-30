@@ -44,13 +44,11 @@ fn stack_depth(program: &[Instruction]) -> u64 {
 }
 
 struct Constants<'ctx> {
+	ctx: &'ctx Context,
 	word_sort: Sort<'ctx>,
 	instruction_sort: Sort<'ctx>,
 	instruction_consts: Vec<FuncDecl<'ctx>>,
 	instruction_testers: Vec<FuncDecl<'ctx>>,
-	stack_pop_count_func: FuncDecl<'ctx>,
-	stack_push_count_func: FuncDecl<'ctx>,
-	in_range_func: FuncDecl<'ctx>,
 	initial_stack: Vec<Ast<'ctx>>,
 	stack_depth: usize,
 }
@@ -70,30 +68,12 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			.map(|_| ctx.fresh_const("initial_stack", &word_sort))
 			.collect();
 
-		let stack_pop_count_func = ctx.func_decl(
-			ctx.str_sym("stack_pop_count"),
-			&[&instruction_sort],
-			&ctx.int_sort(),
-		);
-		let stack_push_count_func = ctx.func_decl(
-			ctx.str_sym("stack_push_count"),
-			&[&instruction_sort],
-			&ctx.int_sort(),
-		);
-		let in_range_func = ctx.func_decl(
-			ctx.str_sym("in_range"),
-			&[&ctx.int_sort(), &ctx.int_sort(), &ctx.int_sort()],
-			&ctx.bool_sort(),
-		);
-
 		let constants = Constants {
+			ctx,
 			word_sort,
 			instruction_sort,
 			instruction_consts,
 			instruction_testers,
-			stack_pop_count_func,
-			stack_push_count_func,
-			in_range_func,
 			initial_stack,
 			stack_depth,
 		};
@@ -129,15 +109,37 @@ impl<'ctx, 'solver> Constants<'ctx> {
 	}
 
 	fn stack_pop_count(&self, instr: &Ast<'ctx>) -> Ast<'ctx> {
-		self.stack_pop_count_func.apply(&[instr])
+		let stack_pop_count_func = self.ctx.func_decl(
+			self.ctx.str_sym("stack_pop_count"),
+			&[&self.instruction_sort],
+			&self.ctx.int_sort(),
+		);
+
+		stack_pop_count_func.apply(&[instr])
 	}
 
 	fn stack_push_count(&self, instr: &Ast<'ctx>) -> Ast<'ctx> {
-		self.stack_push_count_func.apply(&[instr])
+		let stack_push_count_func = self.ctx.func_decl(
+			self.ctx.str_sym("stack_push_count"),
+			&[&self.instruction_sort],
+			&self.ctx.int_sort(),
+		);
+
+		stack_push_count_func.apply(&[instr])
 	}
 
 	fn in_range(&self, a: &Ast<'ctx>, b: &Ast<'ctx>, c: &Ast<'ctx>) -> Ast<'ctx> {
-		self.in_range_func.apply(&[a, b, c])
+		let in_range_func = self.ctx.func_decl(
+			self.ctx.str_sym("in_range"),
+			&[
+				&self.ctx.int_sort(),
+				&self.ctx.int_sort(),
+				&self.ctx.int_sort(),
+			],
+			&self.ctx.bool_sort(),
+		);
+
+		in_range_func.apply(&[a, b, c])
 	}
 
 	fn int2word(&self, i: &Ast<'ctx>) -> Ast<'ctx> {
@@ -149,21 +151,7 @@ struct State<'ctx, 'solver, 'constants> {
 	ctx: &'ctx Context,
 	solver: &'solver Solver<'ctx>,
 	constants: &'constants Constants<'ctx>,
-
 	prefix: String,
-
-	stack_func: FuncDecl<'ctx>,
-	// stack_pointer - 1 is top of stack
-	stack_pointer_func: FuncDecl<'ctx>,
-
-	program_length: Ast<'ctx>,
-	program_func: FuncDecl<'ctx>,
-	push_constants_func: FuncDecl<'ctx>,
-
-	transition_func: FuncDecl<'ctx>,
-	transition_stack_pointer_func: FuncDecl<'ctx>,
-	transition_stack_func: FuncDecl<'ctx>,
-	preserve_stack_func: FuncDecl<'ctx>,
 }
 
 impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
@@ -173,77 +161,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		constants: &'constants Constants<'ctx>,
 		prefix: &str,
 	) -> Self {
-		// declare stack function
-		let stack_func = ctx.func_decl(
-			ctx.str_sym(&format!("{}stack", prefix)),
-			&[
-				&ctx.int_sort(), // instruction counter
-				&ctx.int_sort(), // stack address
-			],
-			&constants.word_sort,
-		);
-
-		// declare stack pointer function
-		let stack_pointer_func = ctx.func_decl(
-			ctx.str_sym(&format!("{}stack_pointer", prefix)),
-			&[&ctx.int_sort()],
-			&ctx.int_sort(),
-		);
-
-		// declare program function
-		let program_func = ctx.func_decl(
-			ctx.str_sym(&format!("{}program", prefix)),
-			&[&ctx.int_sort()],
-			&constants.instruction_sort,
-		);
-		// declare push_constants function
-		let push_constants_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "push_constants")),
-			&[&ctx.int_sort()],
-			&constants.word_sort,
-		);
-		// declare program length constant
-		let program_length = ctx.named_int_const(&(prefix.to_owned() + "program_length"));
-
-		// declare transition functions
-		let transition_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "transition")),
-			&[&ctx.int_sort()],
-			&ctx.bool_sort(),
-		);
-		let transition_stack_pointer_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "transition_stack_pointer")),
-			&[&ctx.int_sort()],
-			&ctx.bool_sort(),
-		);
-		let transition_stack_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "transition_stack")),
-			&[&ctx.int_sort(), &constants.instruction_sort],
-			&ctx.bool_sort(),
-		);
-		let preserve_stack_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "preserve_stack")),
-			&[&ctx.int_sort()],
-			&ctx.bool_sort(),
-		);
-
 		let state = State {
 			ctx,
 			solver,
 			constants,
-
 			prefix: prefix.to_string(),
-			stack_func,
-			stack_pointer_func,
-
-			program_func,
-			push_constants_func,
-			program_length,
-
-			transition_func,
-			transition_stack_pointer_func,
-			transition_stack_func,
-			preserve_stack_func,
 		};
 
 		state.set_initial();
@@ -296,16 +218,16 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// set length
 		self.solver.assert(
 			&self
-				.program_length
+				.program_length()
 				._eq(&self.ctx.from_u64(program.len() as u64)),
 		)
 	}
 
 	fn define_transition_stack_pointer(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self
-			.constants
-			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
+		let pc_in_range =
+			self.constants
+				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		// encode stack_pointer change
 		let stack_pointer = self.stack_pointer(&pc);
@@ -330,9 +252,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_transition_stack(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self
-			.constants
-			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
+		let pc_in_range =
+			self.constants
+				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		// constants
 		let stack_pointer = self.stack_pointer(&pc);
@@ -388,9 +310,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_transition(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self
-			.constants
-			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
+		let pc_in_range =
+			self.constants
+				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		let definition = self.transition(&pc).iff(&self.preserve_stack(&pc).and(&[
 			&self.transition_stack_pointer(&pc),
@@ -406,9 +328,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_preserve_stack(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self
-			.constants
-			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
+		let pc_in_range =
+			self.constants
+				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		// constants
 		let instr = self.program(&pc);
@@ -441,9 +363,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn assert_transitions(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = self
-			.constants
-			.in_range(&self.ctx.from_u64(0), &pc, &self.program_length);
+		let pc_in_range =
+			self.constants
+				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
 		bounds.push(&pc);
@@ -455,35 +377,97 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn transition(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		self.transition_func.apply(&[pc])
+		let transition_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "transition")),
+			&[&self.ctx.int_sort()],
+			&self.ctx.bool_sort(),
+		);
+
+		transition_func.apply(&[pc])
 	}
 
 	fn transition_stack_pointer(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		self.transition_stack_pointer_func.apply(&[pc])
+		let transition_stack_pointer_func = self.ctx.func_decl(
+			self.ctx
+				.str_sym(&(self.prefix.to_owned() + "transition_stack_pointer")),
+			&[&self.ctx.int_sort()],
+			&self.ctx.bool_sort(),
+		);
+
+		transition_stack_pointer_func.apply(&[pc])
 	}
 
 	fn transition_stack(&self, pc: &Ast<'ctx>, instr: &Ast<'ctx>) -> Ast<'ctx> {
-		self.transition_stack_func.apply(&[pc, instr])
+		let transition_stack_func = self.ctx.func_decl(
+			self.ctx
+				.str_sym(&(self.prefix.to_owned() + "transition_stack")),
+			&[&self.ctx.int_sort(), &self.constants.instruction_sort],
+			&self.ctx.bool_sort(),
+		);
+
+		transition_stack_func.apply(&[pc, instr])
 	}
 
 	fn preserve_stack(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		self.preserve_stack_func.apply(&[pc])
+		let preserve_stack_func = self.ctx.func_decl(
+			self.ctx
+				.str_sym(&(self.prefix.to_owned() + "preserve_stack")),
+			&[&self.ctx.int_sort()],
+			&self.ctx.bool_sort(),
+		);
+
+		preserve_stack_func.apply(&[pc])
 	}
 
+	// stack_pointer - 1 is top of stack
 	fn stack_pointer(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		self.stack_pointer_func.apply(&[pc])
+		let stack_pointer_func = self.ctx.func_decl(
+			self.ctx
+				.str_sym(&(self.prefix.to_owned() + "stack_pointer")),
+			&[&self.ctx.int_sort()],
+			&self.ctx.int_sort(),
+		);
+
+		stack_pointer_func.apply(&[pc])
 	}
 
 	fn stack(&self, pc: &Ast<'ctx>, index: &Ast<'ctx>) -> Ast<'ctx> {
-		self.stack_func.apply(&[pc, index])
+		let stack_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "stack")),
+			&[
+				&self.ctx.int_sort(), // instruction counter
+				&self.ctx.int_sort(), // stack address
+			],
+			&self.constants.word_sort,
+		);
+
+		stack_func.apply(&[pc, index])
 	}
 
 	fn program(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		self.program_func.apply(&[pc])
+		let program_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "program")),
+			&[&self.ctx.int_sort()],
+			&self.constants.instruction_sort,
+		);
+
+		program_func.apply(&[pc])
 	}
 
 	fn push_constants(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		self.push_constants_func.apply(&[pc])
+		let push_constants_func = self.ctx.func_decl(
+			self.ctx
+				.str_sym(&(self.prefix.to_owned() + "push_constants")),
+			&[&self.ctx.int_sort()],
+			&self.constants.word_sort,
+		);
+
+		push_constants_func.apply(&[pc])
+	}
+
+	fn program_length(&self) -> Ast<'ctx> {
+		self.ctx
+			.named_int_const(&(self.prefix.to_owned() + "program_length"))
 	}
 }
 
@@ -499,13 +483,13 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 		&ctx.from_u64(0),
 		&lhs_pc,
 		// +1 to allow querying for the final state
-		&lhs.program_length.add(&[&ctx.from_u64(1)]),
+		&lhs.program_length().add(&[&ctx.from_u64(1)]),
 	);
 	let rhs_pc_in_range = constants.in_range(
 		&ctx.from_u64(0),
 		&rhs_pc,
 		// +1 to allow querying for the final state
-		&rhs.program_length.add(&[&ctx.from_u64(1)]),
+		&rhs.program_length().add(&[&ctx.from_u64(1)]),
 	);
 	let pcs_in_range = lhs_pc_in_range.and(&[&rhs_pc_in_range]);
 
@@ -516,25 +500,15 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 		&ctx.bool_sort(),
 	);
 
-	let stack_pointers_equal = lhs
-		.stack_pointer_func
-		.apply(&[&lhs_pc])
-		._eq(&rhs.stack_pointer_func.apply(&[&rhs_pc]));
+	let stack_pointers_equal = lhs.stack_pointer(&lhs_pc)._eq(&rhs.stack_pointer(&rhs_pc));
 
 	let stacks_equal = {
 		// for 0 <= n < stack_pointer
 		let n = ctx.named_int_const("n");
-		let n_in_range = constants.in_range(
-			&ctx.from_u64(0),
-			&n,
-			&lhs.stack_pointer_func.apply(&[&lhs_pc]),
-		);
+		let n_in_range = constants.in_range(&ctx.from_u64(0), &n, &lhs.stack_pointer(&lhs_pc));
 
 		// lhs-stack(lhs_pc, n) ==  rhs-stack(rhs_pc, n)
-		let condition = lhs
-			.stack_func
-			.apply(&[&lhs_pc, &n])
-			._eq(&rhs.stack_func.apply(&[&rhs_pc, &n]));
+		let condition = lhs.stack(&lhs_pc, &n)._eq(&rhs.stack(&rhs_pc, &n));
 
 		ctx.forall_const(&[&n], &n_in_range.implies(&condition))
 	};
@@ -565,7 +539,7 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 	// start equivalent
 	solver.assert(&equivalent_func.apply(&[&ctx.from_u64(0), &ctx.from_u64(0)]));
 
-	let target_length = &target_state.program_length;
+	let target_length = &target_state.program_length();
 
 	let mut current_best = source_program.to_vec();
 
