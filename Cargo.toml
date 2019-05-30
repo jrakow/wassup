@@ -10,6 +10,7 @@ edition = "2018"
 [dependencies]
 parity-wasm = "0.38.0"
 z3 = { path = "../z3.rs/z3" }
+rayon = "1.0.3"
 
 [dev-dependencies]
 wabt = "0.7.4"

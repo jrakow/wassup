@@ -1,5 +1,6 @@
 use crate::block::flat_blocks_mut;
 use parity_wasm::elements::Instruction;
+use rayon::prelude::*;
 
 mod block;
 mod encoding;
@@ -23,8 +24,9 @@ pub fn superoptimize_func_body(func_body: &mut parity_wasm::elements::FuncBody) 
 
 pub fn superoptimize_module(module: &mut parity_wasm::elements::Module) {
 	if let Some(code_section) = module.code_section_mut() {
-		for func_body in code_section.bodies_mut() {
-			superoptimize_func_body(func_body);
-		}
+		code_section
+			.bodies_mut()
+			.par_iter_mut()
+			.for_each(superoptimize_func_body);
 	}
 }
