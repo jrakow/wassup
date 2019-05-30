@@ -2,15 +2,26 @@ use parity_wasm::elements::Instruction;
 use std::convert::TryInto;
 use z3::*;
 
-fn instruction_to_index(i: &Instruction) -> usize {
+static IMPLEMENTED_INSTRUCTIONS: &'static [(Instruction, &'static str)] = &[
+	(Instruction::I32Const(0), "I32Const"),
+	(Instruction::I32Add, "I32Add"),
+	(Instruction::Nop, "Nop"),
+];
+
+fn instruction_templates_equal(i: &Instruction, j: &Instruction) -> bool {
 	use Instruction::*;
 
-	match i {
-		I32Const(_) => 0,
-		I32Add => 1,
-		Nop => 2,
-		_ => unimplemented!(),
+	match (i, j) {
+		(I32Const(_), I32Const(_)) => true,
+		_ => i == j,
 	}
+}
+
+fn instruction_to_index(i: &Instruction) -> usize {
+	IMPLEMENTED_INSTRUCTIONS
+		.iter()
+		.position(|j| instruction_templates_equal(i, &j.0))
+		.unwrap_or_else(|| unimplemented!())
 }
 
 fn stack_pop_push_count(i: &Instruction) -> (u64, u64) {
@@ -25,10 +36,7 @@ fn stack_pop_push_count(i: &Instruction) -> (u64, u64) {
 }
 
 fn iter_intructions() -> impl Iterator<Item = &'static Instruction> {
-	use Instruction::*;
-
-	static INSTRUCTIONS: &[Instruction] = &[I32Const(0), I32Add, Nop];
-	INSTRUCTIONS.iter()
+	IMPLEMENTED_INSTRUCTIONS.iter().map(|i| &i.0)
 }
 
 fn stack_depth(program: &[Instruction]) -> u64 {
@@ -56,13 +64,14 @@ struct Constants<'ctx> {
 impl<'ctx, 'solver> Constants<'ctx> {
 	fn new(ctx: &'ctx Context, solver: &Solver<'ctx>, stack_depth: usize) -> Self {
 		let word_sort = ctx.bitvector_sort(32);
+		let instruction_names: Vec<_> = IMPLEMENTED_INSTRUCTIONS
+			.iter()
+			.map(|i| i.1)
+			.map(|s| ctx.str_sym(s))
+			.collect();
 		let (instruction_sort, instruction_consts, instruction_testers) = ctx.enumeration_sort(
 			&ctx.str_sym("Instruction"),
-			&[
-				&ctx.str_sym("I32Const"),
-				&ctx.str_sym("I32Add"),
-				&ctx.str_sym("Nop"),
-			],
+			&instruction_names.iter().collect::<Vec<_>>()[..],
 		);
 		let initial_stack: Vec<_> = (0..stack_depth)
 			.map(|_| ctx.fresh_const("initial_stack", &word_sort))
