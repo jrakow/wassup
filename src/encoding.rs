@@ -59,7 +59,7 @@ impl<'ctx, 'solver> Constants<'ctx> {
 	fn new(ctx: &'ctx Context, solver: &Solver<'ctx>, stack_depth: usize) -> Self {
 		let word_sort = ctx.bitvector_sort(32);
 		let (instruction_sort, instruction_consts, instruction_testers) = ctx.enumeration_sort(
-			&ctx.str_sym("instruction-sort"),
+			&ctx.str_sym("Instruction"),
 			&[
 				&ctx.str_sym("I32Const"),
 				&ctx.str_sym("I32Add"),
@@ -67,21 +67,21 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			],
 		);
 		let initial_stack: Vec<_> = (0..stack_depth)
-			.map(|_| ctx.fresh_const("initial-stack", &word_sort))
+			.map(|_| ctx.fresh_const("initial_stack", &word_sort))
 			.collect();
 
 		let stack_pop_count_func = ctx.func_decl(
-			ctx.str_sym("stack-pop-count"),
+			ctx.str_sym("stack_pop_count"),
 			&[&instruction_sort],
 			&ctx.int_sort(),
 		);
 		let stack_push_count_func = ctx.func_decl(
-			ctx.str_sym("stack-push-count"),
+			ctx.str_sym("stack_push_count"),
 			&[&instruction_sort],
 			&ctx.int_sort(),
 		);
 		let in_range_func = ctx.func_decl(
-			ctx.str_sym("in-range"),
+			ctx.str_sym("in_range"),
 			&[&ctx.int_sort(), &ctx.int_sort(), &ctx.int_sort()],
 			&ctx.bool_sort(),
 		);
@@ -185,7 +185,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// declare stack pointer function
 		let stack_pointer_func = ctx.func_decl(
-			ctx.str_sym(&format!("{}stack-pointer", prefix)),
+			ctx.str_sym(&format!("{}stack_pointer", prefix)),
 			&[&ctx.int_sort()],
 			&ctx.int_sort(),
 		);
@@ -198,12 +198,12 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		);
 		// declare push_constants function
 		let push_constants_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "push-constants")),
+			ctx.str_sym(&(prefix.to_owned() + "push_constants")),
 			&[&ctx.int_sort()],
 			&constants.word_sort,
 		);
 		// declare program length constant
-		let program_length = ctx.named_int_const(&(prefix.to_owned() + "program-length"));
+		let program_length = ctx.named_int_const(&(prefix.to_owned() + "program_length"));
 
 		// declare transition functions
 		let transition_func = ctx.func_decl(
@@ -212,17 +212,17 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&ctx.bool_sort(),
 		);
 		let transition_stack_pointer_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "transition-stack-pointer")),
+			ctx.str_sym(&(prefix.to_owned() + "transition_stack_pointer")),
 			&[&ctx.int_sort()],
 			&ctx.bool_sort(),
 		);
 		let transition_stack_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "transition-stack")),
+			ctx.str_sym(&(prefix.to_owned() + "transition_stack")),
 			&[&ctx.int_sort(), &constants.instruction_sort],
 			&ctx.bool_sort(),
 		);
 		let preserve_stack_func = ctx.func_decl(
-			ctx.str_sym(&(prefix.to_owned() + "preserve-stack")),
+			ctx.str_sym(&(prefix.to_owned() + "preserve_stack")),
 			&[&ctx.int_sort()],
 			&ctx.bool_sort(),
 		);
@@ -553,8 +553,8 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 	let solver = Solver::new(&ctx);
 
 	let constants = Constants::new(&ctx, &solver, stack_depth(source_program) as usize);
-	let source_state = State::new(&ctx, &solver, &constants, "source-");
-	let target_state = State::new(&ctx, &solver, &constants, "target-");
+	let source_state = State::new(&ctx, &solver, &constants, "source_");
+	let target_state = State::new(&ctx, &solver, &constants, "target_");
 	source_state.set_source_program(source_program);
 
 	source_state.assert_transitions();
@@ -915,8 +915,8 @@ mod tests {
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let source_state = State::new(&ctx, &solver, &constants, "source-");
-		let target_state = State::new(&ctx, &solver, &constants, "target-");
+		let source_state = State::new(&ctx, &solver, &constants, "source_");
+		let target_state = State::new(&ctx, &solver, &constants, "target_");
 
 		source_state.set_source_program(program);
 		target_state.set_source_program(program);
@@ -949,8 +949,8 @@ mod tests {
 		let rhs_program = &[Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source-");
-		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
+		let lhs_state = State::new(&ctx, &solver, &constants, "source_");
+		let rhs_state = State::new(&ctx, &solver, &constants, "target_");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
 
@@ -978,8 +978,8 @@ mod tests {
 		let rhs_program = &[Instruction::I32Const(2), Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source-");
-		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
+		let lhs_state = State::new(&ctx, &solver, &constants, "source_");
+		let rhs_state = State::new(&ctx, &solver, &constants, "target_");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
 
@@ -1007,8 +1007,8 @@ mod tests {
 		let rhs_program = &[Instruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source-");
-		let rhs_state = State::new(&ctx, &solver, &constants, "target-");
+		let lhs_state = State::new(&ctx, &solver, &constants, "source_");
+		let rhs_state = State::new(&ctx, &solver, &constants, "target_");
 		lhs_state.set_source_program(lhs_program);
 		rhs_state.set_source_program(rhs_program);
 
