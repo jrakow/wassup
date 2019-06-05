@@ -307,10 +307,14 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		let a = ctx.named_int_const("a");
 		let b = ctx.named_int_const("b");
 		let c = ctx.named_int_const("c");
-		let body = constants
-			.in_range(&a, &b, &c)
-			._eq(&a.le(&b).and(&[&b.lt(&c)]));
-		solver.assert(&ctx.forall_const(&[&a, &b, &c], &body));
+		let pattern = constants.in_range(&a, &b, &c);
+		let body = pattern._eq(&a.le(&b).and(&[&b.lt(&c)]));
+		solver.assert(&ctx.forall_const_weight_patterns(
+			0,
+			&[&a, &b, &c],
+			&[&ctx.pattern(&[&pattern])],
+			&body,
+		));
 
 		constants
 	}
@@ -450,15 +454,15 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		let new_pointer = stack_pointer.add(&[&push_count]).sub(&[&pop_count]);
 
-		let definition = self
-			.transition_stack_pointer(&pc)
-			.iff(&stack_pointer_next._eq(&new_pointer));
+		let pattern = self.transition_stack_pointer(&pc);
+		let definition = pattern.iff(&stack_pointer_next._eq(&new_pointer));
 
-		self.solver.assert(
-			&self
-				.ctx
-				.forall_const(&[&pc], &pc_in_range.implies(&definition)),
-		);
+		self.solver.assert(&self.ctx.forall_const_weight_patterns(
+			0,
+			&[&pc],
+			&[&self.ctx.pattern(&[&pattern])],
+			&pc_in_range.implies(&definition),
+		));
 	}
 
 	fn define_transition_stack(&self) {
@@ -470,14 +474,14 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		let define_instruction = |i: &Instruction, ast: &Ast<'ctx>| {
-			let definition = self
-				.transition_stack(&pc, &self.constants.instruction(&i))
-				._eq(&ast);
-			self.solver.assert(
-				&self
-					.ctx
-					.forall_const(&[&pc], &pc_in_range.implies(&definition)),
-			);
+			let pattern = self.transition_stack(&pc, &self.constants.instruction(&i));
+			let definition = pattern._eq(&ast);
+			self.solver.assert(&self.ctx.forall_const_weight_patterns(
+				0,
+				&[&pc],
+				&[&self.ctx.pattern(&[&pattern])],
+				&pc_in_range.implies(&definition),
+			));
 		};
 
 		let bool_to_i32 = |b: &Ast<'ctx>| {
@@ -545,16 +549,26 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			self.constants
 				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
-		let definition = self.transition(&pc).iff(&self.preserve_stack(&pc).and(&[
-			&self.transition_stack_pointer(&pc),
-			&self.transition_stack(&pc, &self.program(&pc)),
-		]));
+		let transition = self.transition(&pc);
+		let transition_stack_pointer = self.transition_stack_pointer(&pc);
+		let transition_stack = self.transition_stack(&pc, &self.program(&pc));
 
-		self.solver.assert(
+		let definition = transition.iff(
 			&self
-				.ctx
-				.forall_const(&[&pc], &pc_in_range.implies(&definition)),
+				.preserve_stack(&pc)
+				.and(&[&transition_stack_pointer, &transition_stack]),
 		);
+
+		self.solver.assert(&self.ctx.forall_const_weight_patterns(
+			0,
+			&[&pc],
+			&[
+				&self.ctx.pattern(&[&transition]),
+				&self.ctx.pattern(&[&transition_stack_pointer]),
+				&self.ctx.pattern(&[&transition_stack]),
+			],
+			&pc_in_range.implies(&definition),
+		));
 	}
 
 	fn define_preserve_stack(&self) {
@@ -581,15 +595,27 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let body = n_in_range.implies(&slot_preserved);
 
 		// forall n
-		let stack_is_preserved = self.ctx.forall_const(&[&n], &body);
+		let stack_is_preserved = self.ctx.forall_const_weight_patterns(
+			0,
+			&[&n],
+			&[
+				&self.ctx.pattern(&[&n_in_range]),
+				&self.ctx.pattern(&[&slot_preserved]),
+			],
+			&body,
+		);
 
 		let definition = self.preserve_stack(&pc).iff(&stack_is_preserved);
 
-		self.solver.assert(
-			&self
-				.ctx
-				.forall_const(&[&pc], &pc_in_range.implies(&definition)),
-		);
+		self.solver.assert(&self.ctx.forall_const_weight_patterns(
+			0,
+			&[&pc],
+			&[
+				&self.ctx.pattern(&[&pc_in_range]),
+				&self.ctx.pattern(&[&slot_preserved]),
+			],
+			&pc_in_range.implies(&definition),
+		));
 	}
 
 	fn assert_transitions(&self) {
@@ -600,10 +626,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
 		bounds.push(&pc);
+		let transition = self.transition(&pc);
 		self.solver.assert(
 			&self
 				.ctx
-				.forall_const(&bounds, &pc_in_range.implies(&self.transition(&pc))),
+				.forall_const(&bounds, &pc_in_range.implies(&transition)),
 		);
 	}
 
@@ -741,13 +768,23 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 		// lhs-stack(lhs_pc, n) ==  rhs-stack(rhs_pc, n)
 		let condition = lhs.stack(&lhs_pc, &n)._eq(&rhs.stack(&rhs_pc, &n));
 
-		ctx.forall_const(&[&n], &n_in_range.implies(&condition))
+		ctx.forall_const_weight_patterns(
+			0,
+			&[&n],
+			&[&ctx.pattern(&[&n_in_range]), &ctx.pattern(&[&condition])],
+			&n_in_range.implies(&condition),
+		)
 	};
 
 	let expected = equivalent_func.apply(&[&lhs_pc, &rhs_pc]);
 	let actual = stack_pointers_equal.and(&[&stacks_equal]);
 	let equal = expected._eq(&actual);
-	solver.assert(&ctx.forall_const(&[&lhs_pc, &rhs_pc], &pcs_in_range.implies(&equal)));
+	solver.assert(&ctx.forall_const_weight_patterns(
+		0,
+		&[&lhs_pc, &rhs_pc],
+		&[&ctx.pattern(&[&expected])],
+		&pcs_in_range.implies(&equal),
+	));
 
 	equivalent_func
 }
