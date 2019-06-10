@@ -253,6 +253,10 @@ fn stack_depth(program: &[Instruction]) -> u64 {
 	lowest.abs().try_into().unwrap()
 }
 
+fn in_range<'ctx>(a: &Ast<'ctx>, b: &Ast<'ctx>, c: &Ast<'ctx>) -> Ast<'ctx> {
+	a.le(&b).and(&[&b.lt(&c)])
+}
+
 struct Constants<'ctx> {
 	ctx: &'ctx Context,
 	word_sort: Sort<'ctx>,
@@ -303,19 +307,6 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			);
 		}
 
-		// define in-range(a, b, c): a <= b && b < c
-		let a = ctx.named_int_const("a");
-		let b = ctx.named_int_const("b");
-		let c = ctx.named_int_const("c");
-		let pattern = constants.in_range(&a, &b, &c);
-		let body = pattern._eq(&a.le(&b).and(&[&b.lt(&c)]));
-		solver.assert(&ctx.forall_const_weight_patterns(
-			0,
-			&[&a, &b, &c],
-			&[&ctx.pattern(&[&pattern])],
-			&body,
-		));
-
 		constants
 	}
 
@@ -341,20 +332,6 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		);
 
 		stack_push_count_func.apply(&[instr])
-	}
-
-	fn in_range(&self, a: &Ast<'ctx>, b: &Ast<'ctx>, c: &Ast<'ctx>) -> Ast<'ctx> {
-		let in_range_func = self.ctx.func_decl(
-			self.ctx.str_sym("in_range"),
-			&[
-				&self.ctx.int_sort(),
-				&self.ctx.int_sort(),
-				&self.ctx.int_sort(),
-			],
-			&self.ctx.bool_sort(),
-		);
-
-		in_range_func.apply(&[a, b, c])
 	}
 
 	fn int2word(&self, i: &Ast<'ctx>) -> Ast<'ctx> {
@@ -440,9 +417,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_transition_stack_pointer(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range =
-			self.constants
-				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
+		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		// encode stack_pointer change
 		let stack_pointer = self.stack_pointer(&pc);
@@ -469,9 +444,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		use Instruction::*;
 
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range =
-			self.constants
-				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
+		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		let define_instruction = |i: &Instruction, ast: &Ast<'ctx>| {
 			let pattern = self.transition_stack(&pc, &self.constants.instruction(&i));
@@ -545,9 +518,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_transition(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range =
-			self.constants
-				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
+		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		let transition = self.transition(&pc);
 		let transition_stack_pointer = self.transition_stack_pointer(&pc);
@@ -573,9 +544,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn define_preserve_stack(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range =
-			self.constants
-				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
+		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		// constants
 		let instr = self.program(&pc);
@@ -584,7 +553,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// preserve stack values stack(_, 0)..=stack(_, stack_pointer - pops - 1)
 		let n = self.ctx.named_int_const("n");
 
-		let n_in_range = self.constants.in_range(
+		let n_in_range = in_range(
 			&self.ctx.from_u64(0),
 			&n,
 			&stack_pointer.sub(&[&self.constants.stack_pop_count(&instr)]),
@@ -620,9 +589,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	fn assert_transitions(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range =
-			self.constants
-				.in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
+		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
 		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
 		bounds.push(&pc);
@@ -731,19 +698,18 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx> {
 	let ctx = lhs.ctx;
-	let constants = rhs.constants;
 	let solver = lhs.solver;
 
 	let lhs_pc = ctx.named_int_const("lhs_pc");
 	let rhs_pc = ctx.named_int_const("rhs_pc");
 
-	let lhs_pc_in_range = constants.in_range(
+	let lhs_pc_in_range = in_range(
 		&ctx.from_u64(0),
 		&lhs_pc,
 		// +1 to allow querying for the final state
 		&lhs.program_length().add(&[&ctx.from_u64(1)]),
 	);
-	let rhs_pc_in_range = constants.in_range(
+	let rhs_pc_in_range = in_range(
 		&ctx.from_u64(0),
 		&rhs_pc,
 		// +1 to allow querying for the final state
@@ -763,7 +729,7 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 	let stacks_equal = {
 		// for 0 <= n < stack_pointer
 		let n = ctx.named_int_const("n");
-		let n_in_range = constants.in_range(&ctx.from_u64(0), &n, &lhs.stack_pointer(&lhs_pc));
+		let n_in_range = in_range(&ctx.from_u64(0), &n, &lhs.stack_pointer(&lhs_pc));
 
 		// lhs-stack(lhs_pc, n) ==  rhs-stack(rhs_pc, n)
 		let condition = lhs.stack(&lhs_pc, &n)._eq(&rhs.stack(&rhs_pc, &n));
@@ -815,7 +781,7 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 		solver.push();
 
 		// force target program to be shorter than current best
-		solver.assert(&constants.in_range(
+		solver.assert(&in_range(
 			&ctx.from_u64(0),
 			target_length,
 			&ctx.from_u64(current_best.len() as u64),
