@@ -310,7 +310,7 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		constants
 	}
 
-	fn instruction(&'ctx self, i: &Instruction) -> Ast {
+	fn instruction(&self, i: &Instruction) -> Ast<'ctx> {
 		self.instruction_consts[instruction_to_index(i)].apply(&[])
 	}
 
@@ -362,11 +362,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		state.set_initial();
 
-		state.define_transition_stack_pointer();
-		state.define_transition_stack();
-		state.define_transition();
-		state.define_preserve_stack();
-
 		state
 	}
 
@@ -415,10 +410,29 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		)
 	}
 
-	fn define_transition_stack_pointer(&self) {
+	fn assert_transitions(&self) {
 		let pc = self.ctx.named_int_const("pc");
 		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
+		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
+		bounds.push(&pc);
+		let transition = self.transition(&pc);
+		self.solver.assert(
+			&self
+				.ctx
+				.forall_const(&bounds, &pc_in_range.implies(&transition)),
+		);
+	}
+
+	fn transition(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
+		self.ctx.from_bool(true).and(&[
+			&self.preserve_stack(&pc),
+			&self.transition_stack_pointer(&pc),
+			&self.transition_stack(&pc),
+		])
+	}
+
+	fn transition_stack_pointer(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		// encode stack_pointer change
 		let stack_pointer = self.stack_pointer(&pc);
 		let stack_pointer_next = self.stack_pointer(&pc.add(&[&self.ctx.from_u64(1)]));
@@ -429,32 +443,16 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		let new_pointer = stack_pointer.add(&[&push_count]).sub(&[&pop_count]);
 
-		let pattern = self.transition_stack_pointer(&pc);
-		let definition = pattern.iff(&stack_pointer_next._eq(&new_pointer));
-
-		self.solver.assert(&self.ctx.forall_const_weight_patterns(
-			0,
-			&[&pc],
-			&[&self.ctx.pattern(&[&pattern])],
-			&pc_in_range.implies(&definition),
-		));
+		stack_pointer_next._eq(&new_pointer)
 	}
 
-	fn define_transition_stack(&self) {
+	fn transition_stack(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		use Instruction::*;
 
-		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
+		let instr = self.program(&pc);
 
-		let define_instruction = |i: &Instruction, ast: &Ast<'ctx>| {
-			let pattern = self.transition_stack(&pc, &self.constants.instruction(&i));
-			let definition = pattern._eq(&ast);
-			self.solver.assert(&self.ctx.forall_const_weight_patterns(
-				0,
-				&[&pc],
-				&[&self.ctx.pattern(&[&pattern])],
-				&pc_in_range.implies(&definition),
-			));
+		let transition_instruction = |i: &Instruction, ast: &Ast<'ctx>| -> Ast<'ctx> {
+			self.constants.instruction(i)._eq(&instr).implies(ast)
 		};
 
 		let bool_to_i32 = |b: &Ast<'ctx>| {
@@ -474,78 +472,48 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				.sub(&[&self.ctx.from_i64(1)]),
 		);
 
-		// instr == Nop
-		define_instruction(&Instruction::Nop, &self.ctx.from_bool(true));
-
-		define_instruction(&I32Const(0), &result._eq(&self.push_constants(&pc)));
-		define_instruction(
-			&I32Eqz,
-			&result._eq(&bool_to_i32(&op1._eq(&self.ctx.from_u64(0).int2bv(32)))),
-		);
-		define_instruction(&I32Eq, &result._eq(&bool_to_i32(&op1._eq(&op2))));
-		define_instruction(&I32Ne, &result._eq(&bool_to_i32(&op1._eq(&op2).not())));
-
-		define_instruction(&I32LtS, &result._eq(&bool_to_i32(&op1.bvslt(&op2))));
-		define_instruction(&I32LtU, &result._eq(&bool_to_i32(&op1.bvult(&op2))));
-		define_instruction(&I32GtS, &result._eq(&bool_to_i32(&op1.bvsgt(&op2))));
-		define_instruction(&I32GtU, &result._eq(&bool_to_i32(&op1.bvugt(&op2))));
-		define_instruction(&I32LeS, &result._eq(&bool_to_i32(&op1.bvsle(&op2))));
-		define_instruction(&I32LeU, &result._eq(&bool_to_i32(&op1.bvule(&op2))));
-		define_instruction(&I32GeS, &result._eq(&bool_to_i32(&op1.bvsge(&op2))));
-		define_instruction(&I32GeU, &result._eq(&bool_to_i32(&op1.bvuge(&op2))));
-
-		// TODO
-		// I32Clz
-		// I32Ctz
-		// I32Popcnt
-
-		define_instruction(&I32Add, &result._eq(&op1.bvadd(&op2)));
-		define_instruction(&I32Sub, &result._eq(&op1.bvsub(&op2)));
-		define_instruction(&I32Mul, &result._eq(&op1.bvmul(&op2)));
-		define_instruction(&I32DivS, &result._eq(&op1.bvsdiv(&op2)));
-		define_instruction(&I32DivU, &result._eq(&op1.bvudiv(&op2)));
-		define_instruction(&I32RemS, &result._eq(&op1.bvsrem(&op2)));
-		define_instruction(&I32RemU, &result._eq(&op1.bvurem(&op2)));
-		define_instruction(&I32And, &result._eq(&op1.bvand(&op2)));
-		define_instruction(&I32Or, &result._eq(&op1.bvor(&op2)));
-		define_instruction(&I32Xor, &result._eq(&op1.bvxor(&op2)));
-		define_instruction(&I32Shl, &result._eq(&op1.bvshl(&op2)));
-		define_instruction(&I32ShrS, &result._eq(&op1.bvashr(&op2)));
-		define_instruction(&I32ShrU, &result._eq(&op1.bvlshr(&op2)));
-		define_instruction(&I32Rotl, &result._eq(&op1.bvrotl(&op2)));
-		define_instruction(&I32Rotr, &result._eq(&op1.bvrotr(&op2)));
+		let transitions = &[
+			// instr == Nop
+			&transition_instruction(&Instruction::Nop, &self.ctx.from_bool(true)),
+			&transition_instruction(&I32Const(0), &result._eq(&self.push_constants(&pc))),
+			&transition_instruction(
+				&I32Eqz,
+				&result._eq(&bool_to_i32(&op1._eq(&self.ctx.from_u64(0).int2bv(32)))),
+			),
+			&transition_instruction(&I32Eq, &result._eq(&bool_to_i32(&op1._eq(&op2)))),
+			&transition_instruction(&I32Ne, &result._eq(&bool_to_i32(&op1._eq(&op2).not()))),
+			&transition_instruction(&I32LtS, &result._eq(&bool_to_i32(&op1.bvslt(&op2)))),
+			&transition_instruction(&I32LtU, &result._eq(&bool_to_i32(&op1.bvult(&op2)))),
+			&transition_instruction(&I32GtS, &result._eq(&bool_to_i32(&op1.bvsgt(&op2)))),
+			&transition_instruction(&I32GtU, &result._eq(&bool_to_i32(&op1.bvugt(&op2)))),
+			&transition_instruction(&I32LeS, &result._eq(&bool_to_i32(&op1.bvsle(&op2)))),
+			&transition_instruction(&I32LeU, &result._eq(&bool_to_i32(&op1.bvule(&op2)))),
+			&transition_instruction(&I32GeS, &result._eq(&bool_to_i32(&op1.bvsge(&op2)))),
+			&transition_instruction(&I32GeU, &result._eq(&bool_to_i32(&op1.bvuge(&op2)))),
+			// TODO
+			// I32Clz
+			// I32Ctz
+			// I32Popcnt
+			&transition_instruction(&I32Add, &result._eq(&op1.bvadd(&op2))),
+			&transition_instruction(&I32Sub, &result._eq(&op1.bvsub(&op2))),
+			&transition_instruction(&I32Mul, &result._eq(&op1.bvmul(&op2))),
+			&transition_instruction(&I32DivS, &result._eq(&op1.bvsdiv(&op2))),
+			&transition_instruction(&I32DivU, &result._eq(&op1.bvudiv(&op2))),
+			&transition_instruction(&I32RemS, &result._eq(&op1.bvsrem(&op2))),
+			&transition_instruction(&I32RemU, &result._eq(&op1.bvurem(&op2))),
+			&transition_instruction(&I32And, &result._eq(&op1.bvand(&op2))),
+			&transition_instruction(&I32Or, &result._eq(&op1.bvor(&op2))),
+			&transition_instruction(&I32Xor, &result._eq(&op1.bvxor(&op2))),
+			&transition_instruction(&I32Shl, &result._eq(&op1.bvshl(&op2))),
+			&transition_instruction(&I32ShrS, &result._eq(&op1.bvashr(&op2))),
+			&transition_instruction(&I32ShrU, &result._eq(&op1.bvlshr(&op2))),
+			&transition_instruction(&I32Rotl, &result._eq(&op1.bvrotl(&op2))),
+			&transition_instruction(&I32Rotr, &result._eq(&op1.bvrotr(&op2))),
+		];
+		self.ctx.from_bool(true).and(transitions)
 	}
 
-	fn define_transition(&self) {
-		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
-
-		let transition = self.transition(&pc);
-		let transition_stack_pointer = self.transition_stack_pointer(&pc);
-		let transition_stack = self.transition_stack(&pc, &self.program(&pc));
-
-		let definition = transition.iff(
-			&self
-				.preserve_stack(&pc)
-				.and(&[&transition_stack_pointer, &transition_stack]),
-		);
-
-		self.solver.assert(&self.ctx.forall_const_weight_patterns(
-			0,
-			&[&pc],
-			&[
-				&self.ctx.pattern(&[&transition]),
-				&self.ctx.pattern(&[&transition_stack_pointer]),
-				&self.ctx.pattern(&[&transition_stack]),
-			],
-			&pc_in_range.implies(&definition),
-		));
-	}
-
-	fn define_preserve_stack(&self) {
-		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
-
+	fn preserve_stack(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		// constants
 		let instr = self.program(&pc);
 		let stack_pointer = self.stack_pointer(&pc);
@@ -561,87 +529,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let slot_preserved = self
 			.stack(&pc, &n)
 			._eq(&self.stack(&pc.add(&[&self.ctx.from_u64(1)]), &n));
-		let body = n_in_range.implies(&slot_preserved);
 
 		// forall n
-		let stack_is_preserved = self.ctx.forall_const_weight_patterns(
-			0,
-			&[&n],
-			&[
-				&self.ctx.pattern(&[&n_in_range]),
-				&self.ctx.pattern(&[&slot_preserved]),
-			],
-			&body,
-		);
-
-		let definition = self.preserve_stack(&pc).iff(&stack_is_preserved);
-
-		self.solver.assert(&self.ctx.forall_const_weight_patterns(
-			0,
-			&[&pc],
-			&[
-				&self.ctx.pattern(&[&pc_in_range]),
-				&self.ctx.pattern(&[&slot_preserved]),
-			],
-			&pc_in_range.implies(&definition),
-		));
-	}
-
-	fn assert_transitions(&self) {
-		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
-
-		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
-		bounds.push(&pc);
-		let transition = self.transition(&pc);
-		self.solver.assert(
-			&self
-				.ctx
-				.forall_const(&bounds, &pc_in_range.implies(&transition)),
-		);
-	}
-
-	fn transition(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		let transition_func = self.ctx.func_decl(
-			self.ctx.str_sym(&(self.prefix.to_owned() + "transition")),
-			&[&self.ctx.int_sort()],
-			&self.ctx.bool_sort(),
-		);
-
-		transition_func.apply(&[pc])
-	}
-
-	fn transition_stack_pointer(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		let transition_stack_pointer_func = self.ctx.func_decl(
-			self.ctx
-				.str_sym(&(self.prefix.to_owned() + "transition_stack_pointer")),
-			&[&self.ctx.int_sort()],
-			&self.ctx.bool_sort(),
-		);
-
-		transition_stack_pointer_func.apply(&[pc])
-	}
-
-	fn transition_stack(&self, pc: &Ast<'ctx>, instr: &Ast<'ctx>) -> Ast<'ctx> {
-		let transition_stack_func = self.ctx.func_decl(
-			self.ctx
-				.str_sym(&(self.prefix.to_owned() + "transition_stack")),
-			&[&self.ctx.int_sort(), &self.constants.instruction_sort],
-			&self.ctx.bool_sort(),
-		);
-
-		transition_stack_func.apply(&[pc, instr])
-	}
-
-	fn preserve_stack(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		let preserve_stack_func = self.ctx.func_decl(
-			self.ctx
-				.str_sym(&(self.prefix.to_owned() + "preserve_stack")),
-			&[&self.ctx.int_sort()],
-			&self.ctx.bool_sort(),
-		);
-
-		preserve_stack_func.apply(&[pc])
+		self.ctx
+			.forall_const(&[&n], &n_in_range.implies(&slot_preserved))
 	}
 
 	// stack_pointer - 1 is top of stack
@@ -696,33 +587,14 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 }
 
-fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx> {
+// this cannot be tested directly as Z3 does not support evaluating terms with quantifiers
+fn equivalent<'ctx>(
+	lhs: &State<'ctx, '_, '_>,
+	lhs_pc: &Ast<'ctx>,
+	rhs: &State<'ctx, '_, '_>,
+	rhs_pc: &Ast<'ctx>,
+) -> Ast<'ctx> {
 	let ctx = lhs.ctx;
-	let solver = lhs.solver;
-
-	let lhs_pc = ctx.named_int_const("lhs_pc");
-	let rhs_pc = ctx.named_int_const("rhs_pc");
-
-	let lhs_pc_in_range = in_range(
-		&ctx.from_u64(0),
-		&lhs_pc,
-		// +1 to allow querying for the final state
-		&lhs.program_length().add(&[&ctx.from_u64(1)]),
-	);
-	let rhs_pc_in_range = in_range(
-		&ctx.from_u64(0),
-		&rhs_pc,
-		// +1 to allow querying for the final state
-		&rhs.program_length().add(&[&ctx.from_u64(1)]),
-	);
-	let pcs_in_range = lhs_pc_in_range.and(&[&rhs_pc_in_range]);
-
-	let name = lhs.prefix.to_owned() + &rhs.prefix + "equivalent";
-	let equivalent_func = ctx.func_decl(
-		ctx.str_sym(&name),
-		&[&ctx.int_sort(), &ctx.int_sort()],
-		&ctx.bool_sort(),
-	);
 
 	let stack_pointers_equal = lhs.stack_pointer(&lhs_pc)._eq(&rhs.stack_pointer(&rhs_pc));
 
@@ -734,25 +606,11 @@ fn define_equivalent<'ctx>(lhs: &'ctx State, rhs: &'ctx State) -> FuncDecl<'ctx>
 		// lhs-stack(lhs_pc, n) ==  rhs-stack(rhs_pc, n)
 		let condition = lhs.stack(&lhs_pc, &n)._eq(&rhs.stack(&rhs_pc, &n));
 
-		ctx.forall_const_weight_patterns(
-			0,
-			&[&n],
-			&[&ctx.pattern(&[&n_in_range]), &ctx.pattern(&[&condition])],
-			&n_in_range.implies(&condition),
-		)
+		ctx.forall_const(&[&n], &n_in_range.implies(&condition))
 	};
 
-	let expected = equivalent_func.apply(&[&lhs_pc, &rhs_pc]);
-	let actual = stack_pointers_equal.and(&[&stacks_equal]);
-	let equal = expected._eq(&actual);
-	solver.assert(&ctx.forall_const_weight_patterns(
-		0,
-		&[&lhs_pc, &rhs_pc],
-		&[&ctx.pattern(&[&expected])],
-		&pcs_in_range.implies(&equal),
-	));
-
-	equivalent_func
+	ctx.from_bool(true)
+		.and(&[&stack_pointers_equal, &stacks_equal])
 }
 
 pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
@@ -768,10 +626,13 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 	source_state.assert_transitions();
 	target_state.assert_transitions();
 
-	let equivalent_func = define_equivalent(&source_state, &target_state);
-
 	// start equivalent
-	solver.assert(&equivalent_func.apply(&[&ctx.from_u64(0), &ctx.from_u64(0)]));
+	solver.assert(&equivalent(
+		&source_state,
+		&ctx.from_u64(0),
+		&target_state,
+		&ctx.from_u64(0),
+	));
 
 	let target_length = &target_state.program_length();
 
@@ -787,9 +648,12 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 			&ctx.from_u64(current_best.len() as u64),
 		));
 		// assert programs are equivalent
-		solver.assert(
-			&equivalent_func.apply(&[&ctx.from_u64(source_program.len() as u64), &target_length]),
-		);
+		solver.assert(&equivalent(
+			&source_state,
+			&ctx.from_u64(source_program.len() as u64),
+			&target_state,
+			&target_length,
+		));
 
 		if !solver.check() {
 			// already optimal
@@ -1107,131 +971,6 @@ mod tests {
 			eval_bv(&state.stack(&ctx.from_u64(1), &ctx.from_u64(0))),
 			eval_bv(&sum)
 		);
-	}
-
-	#[test]
-	fn equivalent_reflexive() {
-		let config = Config::default();
-		let ctx = Context::new(&config);
-		let solver = Solver::new(&ctx);
-
-		let program = &[
-			Instruction::I32Const(1),
-			Instruction::Nop,
-			Instruction::I32Const(2),
-			Instruction::I32Add,
-		];
-
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
-		let source_state = State::new(&ctx, &solver, &constants, "source_");
-		let target_state = State::new(&ctx, &solver, &constants, "target_");
-
-		source_state.set_source_program(program);
-		target_state.set_source_program(program);
-
-		source_state.assert_transitions();
-		target_state.assert_transitions();
-
-		let equivalent_func = define_equivalent(&source_state, &target_state);
-
-		assert!(solver.check());
-		let model = solver.get_model();
-
-		let equivalent = |i, j| equivalent_func.apply(&[&ctx.from_u64(i), &ctx.from_u64(j)]);
-
-		for i in 0..program.len() {
-			let s = equivalent(i as u64, i as u64);
-			let evaled = model.eval(&s).unwrap();
-			let equiv = evaled.as_bool().unwrap();
-			assert!(equiv);
-		}
-	}
-
-	#[test]
-	fn equivalent_nop_no_effect() {
-		let config = Config::default();
-		let ctx = Context::new(&config);
-		let solver = Solver::new(&ctx);
-
-		let lhs_program = &[Instruction::I32Const(1), Instruction::Nop];
-		let rhs_program = &[Instruction::I32Const(1)];
-
-		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source_");
-		let rhs_state = State::new(&ctx, &solver, &constants, "target_");
-		lhs_state.set_source_program(lhs_program);
-		rhs_state.set_source_program(rhs_program);
-
-		lhs_state.assert_transitions();
-		rhs_state.assert_transitions();
-
-		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
-
-		assert!(solver.check());
-		let model = solver.get_model();
-
-		let s = equivalent_func.apply(&[&ctx.from_u64(2), &ctx.from_u64(1)]);
-		let evaled = model.eval(&s).unwrap();
-		let equiv = evaled.as_bool().unwrap();
-		assert!(equiv);
-	}
-
-	#[test]
-	fn equivalent_stack_unequal() {
-		let config = Config::default();
-		let ctx = Context::new(&config);
-		let solver = Solver::new(&ctx);
-
-		let lhs_program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
-		let rhs_program = &[Instruction::I32Const(2), Instruction::I32Const(1)];
-
-		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source_");
-		let rhs_state = State::new(&ctx, &solver, &constants, "target_");
-		lhs_state.set_source_program(lhs_program);
-		rhs_state.set_source_program(rhs_program);
-
-		lhs_state.assert_transitions();
-		rhs_state.assert_transitions();
-
-		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
-
-		assert!(solver.check());
-		let model = solver.get_model();
-
-		let s = equivalent_func.apply(&[&ctx.from_u64(2), &ctx.from_u64(2)]);
-		let evaled = model.eval(&s).unwrap();
-		let equiv = evaled.as_bool().unwrap();
-		assert!(!equiv);
-	}
-
-	#[test]
-	fn equivalent_stack_pointer_unequal() {
-		let config = Config::default();
-		let ctx = Context::new(&config);
-		let solver = Solver::new(&ctx);
-
-		let lhs_program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
-		let rhs_program = &[Instruction::I32Const(1)];
-
-		let constants = Constants::new(&ctx, &solver, stack_depth(lhs_program) as _);
-		let lhs_state = State::new(&ctx, &solver, &constants, "source_");
-		let rhs_state = State::new(&ctx, &solver, &constants, "target_");
-		lhs_state.set_source_program(lhs_program);
-		rhs_state.set_source_program(rhs_program);
-
-		lhs_state.assert_transitions();
-		rhs_state.assert_transitions();
-
-		let equivalent_func = define_equivalent(&lhs_state, &rhs_state);
-
-		assert!(solver.check());
-		let model = solver.get_model();
-
-		let s = equivalent_func.apply(&[&ctx.from_u64(2), &ctx.from_u64(1)]);
-		let evaled = model.eval(&s).unwrap();
-		let equiv = evaled.as_bool().unwrap();
-		assert!(!equiv);
 	}
 
 	#[test]
