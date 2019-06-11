@@ -13,4 +13,9 @@ z3 = { path = "../z3.rs/z3" }
 rayon = "1.0.3"
 
 [dev-dependencies]
+criterion = "0.2.11"
 wabt = "0.7.4"
+
+[[bench]]
+name = "superoptimize"
+harness = false
