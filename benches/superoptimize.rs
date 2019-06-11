@@ -32,5 +32,9 @@ fn const_nop(c: &mut Criterion) {
 	});
 }
 
-criterion_group!(benches, const0_add, consts_add, const_nop);
+criterion_group! {
+	name = benches;
+	config = Criterion::default().sample_size(10);
+	targets = const0_add, consts_add, const_nop
+}
 criterion_main!(benches);
