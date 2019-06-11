@@ -1343,3 +1343,6 @@ mod tests {
 		assert_eq!(target, source_program);
 	}
 }
+
+#[cfg(test)]
+mod spec_tests;
