@@ -4,7 +4,6 @@ use std::{collections::HashMap, fs::read};
 use wabt::script::{Action, Action::*, Command, CommandKind, ScriptParser, Value};
 
 #[test]
-#[ignore]
 fn test_i32() {
 	spec_test("i32.wast")
 }
@@ -26,6 +25,13 @@ fn spec_test(name: &str) {
 				modules.insert(name, module);
 			}
 			CommandKind::AssertReturn { action, expected } => {
+				if let Invoke { field, .. } = &action {
+					if field == "clz" || field == "ctz" || field == "popcnt" {
+						// TODO
+						continue;
+					}
+				}
+
 				let res = action_result(&modules, action);
 				assert_eq!(res, value_cast(expected[0]));
 			}
