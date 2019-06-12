@@ -1327,4 +1327,19 @@ mod tests {
 		let target = superoptimize(source_program, 0);
 		assert_eq!(target, vec![]);
 	}
+
+	#[test]
+	fn superoptimize_setlocal_0() {
+		let source_program = &[Instruction::I32Const(0), Instruction::SetLocal(0)];
+		let target = superoptimize(source_program, 0);
+		assert_eq!(target, vec![]);
+	}
+
+	#[test]
+	#[ignore] // TODO
+	fn no_superoptimize_setlocal() {
+		let source_program = &[Instruction::I32Const(3), Instruction::SetLocal(0)];
+		let target = superoptimize(source_program, 1);
+		assert_eq!(target, source_program);
+	}
 }
