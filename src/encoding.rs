@@ -527,12 +527,14 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			self.constants.instruction(i)._eq(&instr).implies(ast)
 		};
 
+		// ad-hoc conversions
 		let bool_to_i32 = |b: &Ast<'ctx>| {
 			b.ite(
 				&self.ctx.from_u64(1).int2bv(32),
 				&self.ctx.from_u64(0).int2bv(32),
 			)
 		};
+		let mod_n = |b: &Ast<'ctx>, n: u64| b.bvurem(&self.ctx.from_u64(n).int2bv(32));
 
 		// constants
 		let bv_zero = self.ctx.from_u64(0).int2bv(32);
@@ -577,11 +579,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&transition_instruction(&I32And, &result._eq(&op2.bvand(&op1))),
 			&transition_instruction(&I32Or, &result._eq(&op2.bvor(&op1))),
 			&transition_instruction(&I32Xor, &result._eq(&op2.bvxor(&op1))),
-			&transition_instruction(&I32Shl, &result._eq(&op2.bvshl(&op1))),
-			&transition_instruction(&I32ShrS, &result._eq(&op2.bvashr(&op1))),
-			&transition_instruction(&I32ShrU, &result._eq(&op2.bvlshr(&op1))),
-			&transition_instruction(&I32Rotl, &result._eq(&op2.bvrotl(&op1))),
-			&transition_instruction(&I32Rotr, &result._eq(&op2.bvrotr(&op1))),
+			&transition_instruction(&I32Shl, &result._eq(&op2.bvshl(&mod_n(&op1, 32)))),
+			&transition_instruction(&I32ShrS, &result._eq(&op2.bvashr(&mod_n(&op1, 32)))),
+			&transition_instruction(&I32ShrU, &result._eq(&op2.bvlshr(&mod_n(&op1, 32)))),
+			&transition_instruction(&I32Rotl, &result._eq(&op2.bvrotl(&mod_n(&op1, 32)))),
+			&transition_instruction(&I32Rotr, &result._eq(&op2.bvrotr(&mod_n(&op1, 32)))),
 			// Drop: no semantics
 			&transition_instruction(&Select, &result._eq(&op1._eq(&bv_zero).ite(&op2, &op3))),
 			// locals
