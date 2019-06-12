@@ -19,9 +19,9 @@ static IMPLEMENTED_INSTRUCTIONS: &'static [(Instruction, &'static str)] = &[
 	//	CallIndirect(u32, u8),
 	(Instruction::Drop, "Drop"),
 	(Instruction::Select, "Select"),
-	//	GetLocal(u32),
-	//	SetLocal(u32),
-	//	TeeLocal(u32),
+	(Instruction::GetLocal(0), "GetLocal"),
+	(Instruction::SetLocal(0), "SetLocal"),
+	(Instruction::TeeLocal(0), "TeeLocal"),
 	//	GetGlobal(u32),
 	//	SetGlobal(u32),
 
@@ -200,6 +200,9 @@ fn instruction_templates_equal(i: &Instruction, j: &Instruction) -> bool {
 	match (i, j) {
 		(I32Const(_), I32Const(_)) => true,
 		(I64Const(_), I64Const(_)) => true,
+		(GetLocal(_), GetLocal(_)) => true,
+		(SetLocal(_), SetLocal(_)) => true,
+		(TeeLocal(_), TeeLocal(_)) => true,
 		_ => i == j,
 	}
 }
@@ -235,6 +238,11 @@ fn stack_pop_push_count(i: &Instruction) -> (u64, u64) {
 		Drop => (1, 0),
 		Select => (3, 1),
 
+		// locals
+		GetLocal(_) => (0, 1),
+		SetLocal(_) => (1, 0),
+		TeeLocal(_) => (0, 0),
+
 		_ => unimplemented!(),
 	}
 }
@@ -266,11 +274,12 @@ struct Constants<'ctx> {
 	instruction_consts: Vec<FuncDecl<'ctx>>,
 	instruction_testers: Vec<FuncDecl<'ctx>>,
 	initial_stack: Vec<Ast<'ctx>>,
+	params: Vec<Ast<'ctx>>,
 	stack_depth: usize,
 }
 
 impl<'ctx, 'solver> Constants<'ctx> {
-	fn new(ctx: &'ctx Context, solver: &Solver<'ctx>, stack_depth: usize) -> Self {
+	fn new(ctx: &'ctx Context, solver: &Solver<'ctx>, stack_depth: usize, n_params: usize) -> Self {
 		let word_sort = ctx.bitvector_sort(32);
 		let instruction_names: Vec<_> = IMPLEMENTED_INSTRUCTIONS
 			.iter()
@@ -284,6 +293,9 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		let initial_stack: Vec<_> = (0..stack_depth)
 			.map(|_| ctx.fresh_const("initial_stack", &word_sort))
 			.collect();
+		let params: Vec<_> = (0..n_params)
+			.map(|_| ctx.fresh_const("param", &word_sort))
+			.collect();
 
 		let constants = Constants {
 			ctx,
@@ -292,6 +304,7 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			instruction_consts,
 			instruction_testers,
 			initial_stack,
+			params,
 			stack_depth,
 		};
 
@@ -336,6 +349,15 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		stack_push_count_func.apply(&[instr])
 	}
 
+	#[cfg(test)]
+	fn set_params(&self, solver: &Solver, params: &[u32]) {
+		for (i, v) in params.iter().enumerate() {
+			let v = self.ctx.from_u64(*v as _).int2bv(32);
+
+			solver.assert(&self.params[i]._eq(&v));
+		}
+	}
+
 	fn int2word(&self, i: &Ast<'ctx>) -> Ast<'ctx> {
 		i.int2bv(32)
 	}
@@ -368,7 +390,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	fn set_initial(&self) {
-		// set stack(0, i) == xs[i]
+		// set stack(0, i) == initial_stack[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
 			self.solver.assert(
 				&self
@@ -383,6 +405,38 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				.stack_pointer(&self.ctx.from_u64(0))
 				._eq(&self.ctx.from_u64(self.constants.stack_depth as _)),
 		);
+
+		// set params
+		for (i, var) in self.constants.params.iter().enumerate() {
+			self.solver.assert(
+				&self
+					.local(&self.ctx.from_u64(0), &self.ctx.from_u64(i as _))
+					._eq(&var),
+			);
+		}
+
+		// force n_locals to be >= n_params
+		let n_params = self.ctx.from_u64(self.constants.params.len() as _);
+		self.solver.assert(&self.n_locals().ge(&n_params));
+
+		// set remaining locals to 0
+		let n = self.ctx.named_int_const("n");
+		let bv_zero = self.constants.int2word(&self.ctx.from_u64(0));
+		let n_in_range = in_range(&n_params, &n, &self.n_locals());
+		self.solver.assert(&self.ctx.forall_const(
+			&[&n],
+			&n_in_range.implies(&self.local(&self.ctx.from_u64(0), &n)._eq(&bv_zero)),
+		));
+
+		// constrain 0 <= local_index <= n_locals
+		let pc = self.ctx.named_int_const("pc");
+		let local_index_in_range = in_range(
+			&self.ctx.from_u64(0),
+			&self.local_index(&pc),
+			&self.n_locals(),
+		);
+		self.solver
+			.assert(&self.ctx.forall_const(&[&pc], &local_index_in_range));
 	}
 
 	fn set_source_program(&self, program: &[Instruction]) {
@@ -393,14 +447,23 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				.assert(&self.program(&self.ctx.from_u64(pc as _))._eq(&instruction))
 		}
 
-		// set push_constants function
 		for (pc, instr) in program.iter().enumerate() {
-			if let Instruction::I32Const(i) = instr {
-				let i = self
-					.constants
-					.int2word(&self.ctx.from_i64((*i).try_into().unwrap()));
-				self.solver
-					.assert(&self.push_constants(&self.ctx.from_u64(pc as _))._eq(&i));
+			use Instruction::*;
+			let pc = self.ctx.from_u64(pc as _);
+
+			// set push_constants function
+			match instr {
+				I32Const(i) => {
+					let i = self
+						.constants
+						.int2word(&self.ctx.from_i64((*i).try_into().unwrap()));
+					self.solver.assert(&self.push_constants(&pc)._eq(&i));
+				}
+				GetLocal(i) | SetLocal(i) | TeeLocal(i) => {
+					self.solver
+						.assert(&self.local_index(&pc)._eq(&self.ctx.from_u64(*i as _)));
+				}
+				_ => {}
 			}
 		}
 
@@ -409,14 +472,20 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&self
 				.program_length()
 				._eq(&self.ctx.from_u64(program.len() as u64)),
-		)
+		);
 	}
 
 	fn assert_transitions(&self) {
 		let pc = self.ctx.named_int_const("pc");
 		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
 
-		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
+		// forall initial_stack values and all params and all pcs
+		let mut bounds: Vec<_> = self
+			.constants
+			.initial_stack
+			.iter()
+			.chain(self.constants.params.iter())
+			.collect();
 		bounds.push(&pc);
 		let transition = self.transition(&pc);
 		self.solver.assert(
@@ -429,6 +498,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn transition(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		self.ctx.from_bool(true).and(&[
 			&self.preserve_stack(&pc),
+			&self.preserve_locals(&pc),
 			&self.transition_stack_pointer(&pc),
 			&self.transition_stack(&pc),
 		])
@@ -466,16 +536,18 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// constants
 		let bv_zero = self.ctx.from_u64(0).int2bv(32);
+		let pc_next = &pc.add(&[&self.ctx.from_u64(1)]);
 
 		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
 		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
 		let op3 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(3)]));
 		let result = self.stack(
-			&pc.add(&[&self.ctx.from_u64(1)]),
-			&self
-				.stack_pointer(&&pc.add(&[&self.ctx.from_u64(1)]))
-				.sub(&[&self.ctx.from_i64(1)]),
+			pc_next,
+			&self.stack_pointer(&pc_next).sub(&[&self.ctx.from_i64(1)]),
 		);
+		let current_local = self.local(&pc, &self.local_index(&pc));
+		// local_index still with pc
+		let next_local = self.local(&pc_next, &self.local_index(&pc));
 
 		let transitions = &[
 			// Nop: no semantics
@@ -512,6 +584,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&transition_instruction(&I32Rotr, &result._eq(&op1.bvrotr(&op2))),
 			// Drop: no semantics
 			&transition_instruction(&Select, &result._eq(&op1._eq(&bv_zero).ite(&op2, &op3))),
+			// locals
+			&transition_instruction(&GetLocal(0), &result._eq(&current_local)),
+			// pop count is different between SetLocal and TeeLocal
+			&transition_instruction(&SetLocal(0), &next_local._eq(&op1)),
+			&transition_instruction(&TeeLocal(0), &next_local._eq(&op1)),
 		];
 		self.ctx.from_bool(true).and(transitions)
 	}
@@ -536,6 +613,31 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// forall n
 		self.ctx
 			.forall_const(&[&n], &n_in_range.implies(&slot_preserved))
+	}
+
+	fn preserve_locals(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
+		// preserve all locals which are not set in this step
+		let i = self.ctx.named_int_const("i");
+		let i_in_range = in_range(&self.ctx.from_u64(0), &i, &self.n_locals());
+
+		let is_setlocal = self.constants.instruction_testers
+			[instruction_to_index(&Instruction::SetLocal(0))]
+		.apply(&[&self.program(&pc)]);
+		let is_teelocal = self.constants.instruction_testers
+			[instruction_to_index(&Instruction::TeeLocal(0))]
+		.apply(&[&self.program(&pc)]);
+		let is_setting_instruction = is_setlocal.or(&[&is_teelocal]);
+		let index_active = i._eq(&self.local_index(&pc));
+		let enable = is_setting_instruction.and(&[&index_active]).not();
+
+		let pc_next = pc.add(&[&self.ctx.from_u64(1)]);
+
+		self.ctx.forall_const(
+			&[&i],
+			&i_in_range
+				.and(&[&enable])
+				.implies(&self.local(&pc_next, &i)._eq(&self.local(&pc, &i))),
+		)
 	}
 
 	// stack_pointer - 1 is top of stack
@@ -584,9 +686,35 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		push_constants_func.apply(&[pc])
 	}
 
+	fn local(&self, pc: &Ast<'ctx>, index: &Ast<'ctx>) -> Ast<'ctx> {
+		let local_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "local")),
+			&[&self.ctx.int_sort(), &self.ctx.int_sort()],
+			&self.constants.word_sort,
+		);
+
+		local_func.apply(&[pc, index])
+	}
+
+	fn local_index(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
+		let local_index_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "local_index")),
+			&[&self.ctx.int_sort()],
+			&self.ctx.int_sort(),
+		);
+
+		local_index_func.apply(&[pc])
+	}
+
 	fn program_length(&self) -> Ast<'ctx> {
 		self.ctx
 			.named_int_const(&(self.prefix.to_owned() + "program_length"))
+	}
+
+	// number of locals including params
+	fn n_locals(&self) -> Ast<'ctx> {
+		self.ctx
+			.named_int_const(&(self.prefix.to_owned() + "n_locals"))
 	}
 }
 
@@ -616,12 +744,17 @@ fn equivalent<'ctx>(
 		.and(&[&stack_pointers_equal, &stacks_equal])
 }
 
-pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
+pub fn superoptimize(source_program: &[Instruction], n_params: usize) -> Vec<Instruction> {
 	let config = Config::default();
 	let ctx = Context::new(&config);
 	let solver = Solver::new(&ctx);
 
-	let constants = Constants::new(&ctx, &solver, stack_depth(source_program) as usize);
+	let constants = Constants::new(
+		&ctx,
+		&solver,
+		stack_depth(source_program) as usize,
+		n_params,
+	);
 	let source_state = State::new(&ctx, &solver, &constants, "source_");
 	let target_state = State::new(&ctx, &solver, &constants, "target_");
 	source_state.set_source_program(source_program);
@@ -683,6 +816,7 @@ pub fn superoptimize(source_program: &[Instruction]) -> Vec<Instruction> {
 					.unwrap();
 
 				if equal {
+					// TODO decode *Local
 					let decoded = if let Instruction::I32Const(_) = instr {
 						let push_constant_ast = target_state.push_constants(&ctx.from_i64(i));
 						let push_constant =
@@ -717,7 +851,7 @@ mod tests {
 			Context::new(&cfg)
 		};
 		let solver = Solver::new(&ctx);
-		let constants = Constants::new(&ctx, &solver, 0);
+		let constants = Constants::new(&ctx, &solver, 0, 0);
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -790,7 +924,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -818,7 +952,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -842,7 +976,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -869,7 +1003,7 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -892,7 +1026,7 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1)];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -927,7 +1061,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -955,7 +1089,7 @@ mod tests {
 
 		let program = &[Instruction::I32Add];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -983,7 +1117,7 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1), Instruction::Drop];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		state.assert_transitions();
@@ -1013,17 +1147,13 @@ mod tests {
 			Instruction::Select,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		state.assert_transitions();
 
-		println!("{}", &solver);
-
 		assert!(solver.check());
 		let model = solver.get_model();
-
-		println!("{}", &model);
 
 		assert_eq!(
 			model
@@ -1059,7 +1189,7 @@ mod tests {
 			Instruction::Select,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		state.assert_transitions();
@@ -1090,9 +1220,93 @@ mod tests {
 	}
 
 	#[test]
+	fn transition_local() {
+		use Instruction::*;
+
+		let ctx = Context::new(&Config::default());
+		let solver = Solver::new(&ctx);
+
+		let program = &[
+			// x2 = x1 + x0
+			GetLocal(0),
+			GetLocal(1),
+			I32Add,
+			SetLocal(2),
+			// swap x0, x1
+			// tmp = x1; x1 = x0; x0 = tmp;
+			GetLocal(1),
+			GetLocal(0),
+			SetLocal(1),
+			SetLocal(0),
+		];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 2);
+		let state = State::new(&ctx, &solver, &constants, "");
+		state.set_source_program(program);
+		state.assert_transitions();
+		constants.set_params(&solver, &[1, 2]);
+
+		println!("{}", &solver);
+
+		assert!(solver.check());
+		let model = solver.get_model();
+
+		println!("{}", &model);
+
+		assert_eq!(model.eval(&state.n_locals()).unwrap().as_u64().unwrap(), 3);
+
+		let stack_pointer = |pc| {
+			model
+				.eval(&state.stack_pointer(&ctx.from_u64(pc)))
+				.unwrap()
+				.as_u64()
+				.unwrap()
+		};
+		let stack = |pc, i| {
+			model
+				.eval(
+					&state
+						.stack(&ctx.from_u64(pc), &ctx.from_u64(i))
+						.bv2int(false),
+				)
+				.unwrap()
+				.as_u64()
+				.unwrap()
+		};
+		let local = |pc, i| {
+			model
+				.eval(
+					&state
+						.local(&ctx.from_u64(pc), &ctx.from_u64(i))
+						.bv2int(false),
+				)
+				.unwrap()
+				.as_u64()
+				.unwrap()
+		};
+
+		assert_eq!(local(0, 0), 1);
+		assert_eq!(local(0, 1), 2);
+		// default value
+		assert_eq!(local(0, 2), 0);
+
+		assert_eq!(stack_pointer(1), 1);
+		assert_eq!(stack(1, 0), 1);
+		assert_eq!(stack_pointer(2), 2);
+		assert_eq!(stack(2, 1), 2);
+
+		assert_eq!(stack_pointer(4), 0);
+		assert_eq!(local(4, 2), 3);
+
+		assert_eq!(stack_pointer(8), 0);
+		assert_eq!(local(8, 0), 2);
+		assert_eq!(local(8, 1), 1);
+	}
+
+	#[test]
 	fn superoptimize_nop() {
 		let source_program = &[Instruction::I32Const(1), Instruction::Nop];
-		let target = superoptimize(source_program);
+		let target = superoptimize(source_program, 0);
 		assert_eq!(target, vec![Instruction::I32Const(1)]);
 	}
 
@@ -1103,14 +1317,14 @@ mod tests {
 			Instruction::I32Const(2),
 			Instruction::I32Add,
 		];
-		let target = superoptimize(source_program);
+		let target = superoptimize(source_program, 0);
 		assert_eq!(target, vec![Instruction::I32Const(3)]);
 	}
 
 	#[test]
 	fn superoptimize_add() {
 		let source_program = &[Instruction::I32Const(0), Instruction::I32Add];
-		let target = superoptimize(source_program);
+		let target = superoptimize(source_program, 0);
 		assert_eq!(target, vec![]);
 	}
 }
