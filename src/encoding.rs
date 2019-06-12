@@ -17,10 +17,8 @@ static IMPLEMENTED_INSTRUCTIONS: &'static [(Instruction, &'static str)] = &[
 
 	//	Call(u32),
 	//	CallIndirect(u32, u8),
-
-	//	Drop,
-	//	Select,
-
+	(Instruction::Drop, "Drop"),
+	(Instruction::Select, "Select"),
 	//	GetLocal(u32),
 	//	SetLocal(u32),
 	//	TeeLocal(u32),
@@ -232,6 +230,10 @@ fn stack_pop_push_count(i: &Instruction) -> (u64, u64) {
 		// ibinop
 		I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
 		| I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => (2, 1),
+
+		// parametric
+		Drop => (1, 0),
+		Select => (3, 1),
 
 		_ => unimplemented!(),
 	}
@@ -463,8 +465,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		};
 
 		// constants
+		let bv_zero = self.ctx.from_u64(0).int2bv(32);
+
 		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
 		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
+		let op3 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(3)]));
 		let result = self.stack(
 			&pc.add(&[&self.ctx.from_u64(1)]),
 			&self
@@ -473,13 +478,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		);
 
 		let transitions = &[
-			// instr == Nop
-			&transition_instruction(&Instruction::Nop, &self.ctx.from_bool(true)),
+			// Nop: no semantics
 			&transition_instruction(&I32Const(0), &result._eq(&self.push_constants(&pc))),
-			&transition_instruction(
-				&I32Eqz,
-				&result._eq(&bool_to_i32(&op1._eq(&self.ctx.from_u64(0).int2bv(32)))),
-			),
+			&transition_instruction(&I32Eqz, &result._eq(&bool_to_i32(&op1._eq(&bv_zero)))),
 			&transition_instruction(&I32Eq, &result._eq(&bool_to_i32(&op1._eq(&op2)))),
 			&transition_instruction(&I32Ne, &result._eq(&bool_to_i32(&op1._eq(&op2).not()))),
 			&transition_instruction(&I32LtS, &result._eq(&bool_to_i32(&op1.bvslt(&op2)))),
@@ -509,6 +510,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&transition_instruction(&I32ShrU, &result._eq(&op1.bvlshr(&op2))),
 			&transition_instruction(&I32Rotl, &result._eq(&op1.bvrotl(&op2))),
 			&transition_instruction(&I32Rotr, &result._eq(&op1.bvrotr(&op2))),
+			// Drop: no semantics
+			&transition_instruction(&Select, &result._eq(&op1._eq(&bv_zero).ite(&op2, &op3))),
 		];
 		self.ctx.from_bool(true).and(transitions)
 	}
@@ -970,6 +973,119 @@ mod tests {
 		assert_eq!(
 			eval_bv(&state.stack(&ctx.from_u64(1), &ctx.from_u64(0))),
 			eval_bv(&sum)
+		);
+	}
+
+	#[test]
+	fn transition_const_drop() {
+		let ctx = Context::new(&Config::default());
+		let solver = Solver::new(&ctx);
+
+		let program = &[Instruction::I32Const(1), Instruction::Drop];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let state = State::new(&ctx, &solver, &constants, "");
+		state.set_source_program(program);
+		state.assert_transitions();
+
+		assert!(solver.check());
+		let model = solver.get_model();
+
+		assert_eq!(
+			model
+				.eval(&state.stack_pointer(&ctx.from_u64(2)))
+				.unwrap()
+				.as_u64()
+				.unwrap(),
+			0
+		);
+	}
+
+	#[test]
+	fn transition_consts_select_true() {
+		let ctx = Context::new(&Config::default());
+		let solver = Solver::new(&ctx);
+
+		let program = &[
+			Instruction::I32Const(1),
+			Instruction::I32Const(2),
+			Instruction::I32Const(3),
+			Instruction::Select,
+		];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let state = State::new(&ctx, &solver, &constants, "");
+		state.set_source_program(program);
+		state.assert_transitions();
+
+		println!("{}", &solver);
+
+		assert!(solver.check());
+		let model = solver.get_model();
+
+		println!("{}", &model);
+
+		assert_eq!(
+			model
+				.eval(&state.stack_pointer(&ctx.from_u64(4)))
+				.unwrap()
+				.as_u64()
+				.unwrap(),
+			1
+		);
+		assert_eq!(
+			model
+				.eval(
+					&state
+						.stack(&ctx.from_u64(4), &ctx.from_u64(0))
+						.bv2int(false)
+				)
+				.unwrap()
+				.as_u64()
+				.unwrap(),
+			1
+		);
+	}
+
+	#[test]
+	fn transition_consts_select_false() {
+		let ctx = Context::new(&Config::default());
+		let solver = Solver::new(&ctx);
+
+		let program = &[
+			Instruction::I32Const(1),
+			Instruction::I32Const(2),
+			Instruction::I32Const(0),
+			Instruction::Select,
+		];
+
+		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _);
+		let state = State::new(&ctx, &solver, &constants, "");
+		state.set_source_program(program);
+		state.assert_transitions();
+
+		assert!(solver.check());
+		let model = solver.get_model();
+
+		assert_eq!(
+			model
+				.eval(&state.stack_pointer(&ctx.from_u64(4)))
+				.unwrap()
+				.as_u64()
+				.unwrap(),
+			1
+		);
+		assert_eq!(
+			model
+				.eval(
+					&state
+						.stack(&ctx.from_u64(4), &ctx.from_u64(0))
+						.bv2int(false)
+				)
+				.unwrap()
+				.as_u64()
+				.unwrap(),
+			2
 		);
 	}
 
