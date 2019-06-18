@@ -1,0 +1,7 @@
+[package]
+name = "wassup-encoding"
+version = "0.1.0"
+authors = ["Julius Rakow <julius@rakow.me>"]
+edition = "2018"
+
+[dependencies]

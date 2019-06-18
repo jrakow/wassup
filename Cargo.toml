@@ -1,5 +1,8 @@
 [workspace]
-members = ["cli"]
+members = [
+	"cli",
+	"encoding",
+]
 
 [package]
 name = "wassup"
@@ -11,6 +14,7 @@ edition = "2018"
 parity-wasm = "0.38.0"
 z3 = { path = "../z3.rs/z3" }
 rayon = "1.0.3"
+wassup-encoding = { path = "encoding" }
 
 [dev-dependencies]
 criterion = "0.2.11"
