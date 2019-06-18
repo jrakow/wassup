@@ -73,7 +73,7 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 			// set initial values
 			let args: Vec<_> = args.iter().cloned().map(value_cast).collect();;
 			constants.set_params(&solver, &args);
-			state.set_source_program(instr);
+			state.set_source_program(instr, params);
 			state.assert_transitions();
 
 			assert!(solver.check());

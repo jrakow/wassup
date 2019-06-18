@@ -1,219 +1,392 @@
-use parity_wasm::elements::Instruction;
+use enum_iterator::IntoEnumIterator;
+use parity_wasm::elements::{
+	Instruction as PInstruction,
+	ValueType::{self, *},
+};
 
-pub static IMPLEMENTED_INSTRUCTIONS: &'static [(Instruction, &'static str)] = &[
-	//	Unreachable,
-	(Instruction::Nop, "Nop"),
-	//	Block(BlockType),
-	//	Loop(BlockType),
-	//	If(BlockType),
-	//	Else,
-	//	End,
-	//	Br(u32),
-	//	BrIf(u32),
-	//	BrTable(Box<BrTableData>),
-	//	Return,
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, IntoEnumIterator)]
+pub enum Instruction {
+	// Unreachable,
+	Nop,
+	// Block(BlockType),
+	// Loop(BlockType),
+	// If(BlockType),
+	// Else,
+	// End,
+	// Br(u32),
+	// BrIf(u32),
+	// BrTable(Box<BrTableData>),
+	// Return,
 
-	//	Call(u32),
-	//	CallIndirect(u32, u8),
-	(Instruction::Drop, "Drop"),
-	(Instruction::Select, "Select"),
-	(Instruction::GetLocal(0), "GetLocal"),
-	(Instruction::SetLocal(0), "SetLocal"),
-	(Instruction::TeeLocal(0), "TeeLocal"),
-	//	GetGlobal(u32),
-	//	SetGlobal(u32),
+	// Call(u32),
+	// CallIndirect(u32, u8),
+	I32Drop,
+	I32Select,
 
-	//	I32Load(u32, u32),
-	//	I64Load(u32, u32),
-	//	F32Load(u32, u32),
-	//	F64Load(u32, u32),
-	//	I32Load8S(u32, u32),
-	//	I32Load8U(u32, u32),
-	//	I32Load16S(u32, u32),
-	//	I32Load16U(u32, u32),
-	//	I64Load8S(u32, u32),
-	//	I64Load8U(u32, u32),
-	//	I64Load16S(u32, u32),
-	//	I64Load16U(u32, u32),
-	//	I64Load32S(u32, u32),
-	//	I64Load32U(u32, u32),
-	//	I32Store(u32, u32),
-	//	I64Store(u32, u32),
-	//	F32Store(u32, u32),
-	//	F64Store(u32, u32),
-	//	I32Store8(u32, u32),
-	//	I32Store16(u32, u32),
-	//	I64Store8(u32, u32),
-	//	I64Store16(u32, u32),
-	//	I64Store32(u32, u32),
+	I32GetLocal,
+	I32SetLocal,
+	I32TeeLocal,
+	// GetGlobal(u32),
+	// SetGlobal(u32),
 
-	//	CurrentMemory(u8),
-	//	GrowMemory(u8),
+	// I32Load(u32, u32),
+	// I64Load(u32, u32),
+	// F32Load(u32, u32),
+	// F64Load(u32, u32),
+	// I32Load8S(u32, u32),
+	// I32Load8U(u32, u32),
+	// I32Load16S(u32, u32),
+	// I32Load16U(u32, u32),
+	// I64Load8S(u32, u32),
+	// I64Load8U(u32, u32),
+	// I64Load16S(u32, u32),
+	// I64Load16U(u32, u32),
+	// I64Load32S(u32, u32),
+	// I64Load32U(u32, u32),
+	// I32Store(u32, u32),
+	// I64Store(u32, u32),
+	// F32Store(u32, u32),
+	// F64Store(u32, u32),
+	// I32Store8(u32, u32),
+	// I32Store16(u32, u32),
+	// I64Store8(u32, u32),
+	// I64Store16(u32, u32),
+	// I64Store32(u32, u32),
 
-	// numeric instructions
-	(Instruction::I32Const(0), "I32Const"),
-	//	(I64Const(0), "I64Const"),
-	//	(F32Const(0), "F32Const"),
-	//	(F64Const(0), "F64Const"),
-	(Instruction::I32Eqz, "I32Eqz"),
-	(Instruction::I32Eq, "I32Eq"),
-	(Instruction::I32Ne, "I32Ne"),
-	(Instruction::I32LtS, "I32LtS"),
-	(Instruction::I32LtU, "I32LtU"),
-	(Instruction::I32GtS, "I32GtS"),
-	(Instruction::I32GtU, "I32GtU"),
-	(Instruction::I32LeS, "I32LeS"),
-	(Instruction::I32LeU, "I32LeU"),
-	(Instruction::I32GeS, "I32GeS"),
-	(Instruction::I32GeU, "I32GeU"),
-	//	(I64Eqz, "I64Eqz"),
-	//	(I64Eq, "I64Eq"),
-	//	(I64Ne, "I64Ne"),
-	//	(I64LtS, "I64LtS"),
-	//	(I64LtU, "I64LtU"),
-	//	(I64GtS, "I64GtS"),
-	//	(I64GtU, "I64GtU"),
-	//	(I64LeS, "I64LeS"),
-	//	(I64LeU, "I64LeU"),
-	//	(I64GeS, "I64GeS"),
-	//	(I64GeU, "I64GeU"),
+	// CurrentMemory(u8),
+	// GrowMemory(u8),
+	I32Const,
+	// I64Const(i64),
+	// F32Const(u32),
+	// F64Const(u64),
+	I32Eqz,
+	I32Eq,
+	I32Ne,
+	I32LtS,
+	I32LtU,
+	I32GtS,
+	I32GtU,
+	I32LeS,
+	I32LeU,
+	I32GeS,
+	I32GeU,
 
-	//	(F32Eq, "F32Eq"),
-	//	(F32Ne, "F32Ne"),
-	//	(F32Lt, "F32Lt"),
-	//	(F32Gt, "F32Gt"),
-	//	(F32Le, "F32Le"),
-	//	(F32Ge, "F32Ge"),
+	// I64Eqz,
+	// I64Eq,
+	// I64Ne,
+	// I64LtS,
+	// I64LtU,
+	// I64GtS,
+	// I64GtU,
+	// I64LeS,
+	// I64LeU,
+	// I64GeS,
+	// I64GeU,
 
-	//	(F64Eq, "F64Eq"),
-	//	(F64Ne, "F64Ne"),
-	//	(F64Lt, "F64Lt"),
-	//	(F64Gt, "F64Gt"),
-	//	(F64Le, "F64Le"),
-	//	(F64Ge, "F64Ge"),
-	//	(I32Clz, "I32Clz"),
-	//	(I32Ctz, "I32Ctz"),
-	//	(I32Popcnt, "I32Popcnt"),
-	(Instruction::I32Add, "I32Add"),
-	(Instruction::I32Sub, "I32Sub"),
-	(Instruction::I32Mul, "I32Mul"),
-	(Instruction::I32DivS, "I32DivS"),
-	(Instruction::I32DivU, "I32DivU"),
-	(Instruction::I32RemS, "I32RemS"),
-	(Instruction::I32RemU, "I32RemU"),
-	(Instruction::I32And, "I32And"),
-	(Instruction::I32Or, "I32Or"),
-	(Instruction::I32Xor, "I32Xor"),
-	(Instruction::I32Shl, "I32Shl"),
-	(Instruction::I32ShrS, "I32ShrS"),
-	(Instruction::I32ShrU, "I32ShrU"),
-	(Instruction::I32Rotl, "I32Rotl"),
-	(Instruction::I32Rotr, "I32Rotr"),
-	//	(I64Clz, "I64Clz"),
-	//	(I64Ctz, "I64Ctz"),
-	//	(I64Popcnt, "I64Popcnt"),
-	//	(I64Add, "I64Add"),
-	//	(I64Sub, "I64Sub"),
-	//	(I64Mul, "I64Mul"),
-	//	(I64DivS, "I64DivS"),
-	//	(I64DivU, "I64DivU"),
-	//	(I64RemS, "I64RemS"),
-	//	(I64RemU, "I64RemU"),
-	//	(I64And, "I64And"),
-	//	(I64Or, "I64Or"),
-	//	(I64Xor, "I64Xor"),
-	//	(I64Shl, "I64Shl"),
-	//	(I64ShrS, "I64ShrS"),
-	//	(I64ShrU, "I64ShrU"),
-	//	(I64Rotl, "I64Rotl"),
-	//	(I64Rotr, "I64Rotr"),
+	// F32Eq,
+	// F32Ne,
+	// F32Lt,
+	// F32Gt,
+	// F32Le,
+	// F32Ge,
 
-	//	(F32Abs, "F32Abs"),
-	//	(F32Neg, "F32Neg"),
-	//	(F32Ceil, "F32Ceil"),
-	//	(F32Floor, "F32Floor"),
-	//	(F32Trunc, "F32Trunc"),
-	//	(F32Nearest, "F32Nearest"),
-	//	(F32Sqrt, "F32Sqrt"),
-	//	(F32Add, "F32Add"),
-	//	(F32Sub, "F32Sub"),
-	//	(F32Mul, "F32Mul"),
-	//	(F32Div, "F32Div"),
-	//	(F32Min, "F32Min"),
-	//	(F32Max, "F32Max"),
-	//	(F32Copysign, "F32Copysign"),
-	//	(F64Abs, "F64Abs"),
-	//	(F64Neg, "F64Neg"),
-	//	(F64Ceil, "F64Ceil"),
-	//	(F64Floor, "F64Floor"),
-	//	(F64Trunc, "F64Trunc"),
-	//	(F64Nearest, "F64Nearest"),
-	//	(F64Sqrt, "F64Sqrt"),
-	//	(F64Add, "F64Add"),
-	//	(F64Sub, "F64Sub"),
-	//	(F64Mul, "F64Mul"),
-	//	(F64Div, "F64Div"),
-	//	(F64Min, "F64Min"),
-	//	(F64Max, "F64Max"),
-	//	(F64Copysign, "F64Copysign"),
+	// F64Eq,
+	// F64Ne,
+	// F64Lt,
+	// F64Gt,
+	// F64Le,
+	// F64Ge,
 
-	//	(I32WrapI64, "I32WrapI64"),
-	//	(I32TruncSF32, "I32TruncSF32"),
-	//	(I32TruncUF32, "I32TruncUF32"),
-	//	(I32TruncSF64, "I32TruncSF64"),
-	//	(I32TruncUF64, "I32TruncUF64"),
-	//	(I64ExtendSI32, "I64ExtendSI32"),
-	//	(I64ExtendUI32, "I64ExtendUI32"),
-	//	(I64TruncSF32, "I64TruncSF32"),
-	//	(I64TruncUF32, "I64TruncUF32"),
-	//	(I64TruncSF64, "I64TruncSF64"),
-	//	(I64TruncUF64, "I64TruncUF64"),
+	// I32Clz,
+	// I32Ctz,
+	// I32Popcnt,
+	I32Add,
+	I32Sub,
+	I32Mul,
+	I32DivS,
+	I32DivU,
+	I32RemS,
+	I32RemU,
+	I32And,
+	I32Or,
+	I32Xor,
+	I32Shl,
+	I32ShrS,
+	I32ShrU,
+	I32Rotl,
+	I32Rotr,
+	// I64Clz,
+	// I64Ctz,
+	// I64Popcnt,
+	// I64Add,
+	// I64Sub,
+	// I64Mul,
+	// I64DivS,
+	// I64DivU,
+	// I64RemS,
+	// I64RemU,
+	// I64And,
+	// I64Or,
+	// I64Xor,
+	// I64Shl,
+	// I64ShrS,
+	// I64ShrU,
+	// I64Rotl,
+	// I64Rotr,
+	// F32Abs,
+	// F32Neg,
+	// F32Ceil,
+	// F32Floor,
+	// F32Trunc,
+	// F32Nearest,
+	// F32Sqrt,
+	// F32Add,
+	// F32Sub,
+	// F32Mul,
+	// F32Div,
+	// F32Min,
+	// F32Max,
+	// F32Copysign,
+	// F64Abs,
+	// F64Neg,
+	// F64Ceil,
+	// F64Floor,
+	// F64Trunc,
+	// F64Nearest,
+	// F64Sqrt,
+	// F64Add,
+	// F64Sub,
+	// F64Mul,
+	// F64Div,
+	// F64Min,
+	// F64Max,
+	// F64Copysign,
 
-	//	(F32ConvertSI32, "F32ConvertSI32"),
-	//	(F32ConvertUI32, "F32ConvertUI32"),
-	//	(F32ConvertSI64, "F32ConvertSI64"),
-	//	(F32ConvertUI64, "F32ConvertUI64"),
-	//	(F32DemoteF64, "F32DemoteF64"),
-	//	(F64ConvertSI32, "F64ConvertSI32"),
-	//	(F64ConvertUI32, "F64ConvertUI32"),
-	//	(F64ConvertSI64, "F64ConvertSI64"),
-	//	(F64ConvertUI64, "F64ConvertUI64"),
-	//	(F64PromoteF32, "F64PromoteF32"),
+	// I32WrapI64,
+	// I32TruncSF32,
+	// I32TruncUF32,
+	// I32TruncSF64,
+	// I32TruncUF64,
+	// I64ExtendSI32,
+	// I64ExtendUI32,
+	// I64TruncSF32,
+	// I64TruncUF32,
+	// I64TruncSF64,
+	// I64TruncUF64,
+	// F32ConvertSI32,
+	// F32ConvertUI32,
+	// F32ConvertSI64,
+	// F32ConvertUI64,
+	// F32DemoteF64,
+	// F64ConvertSI32,
+	// F64ConvertUI32,
+	// F64ConvertSI64,
+	// F64ConvertUI64,
+	// F64PromoteF32,
 
-	//	(I32ReinterpretF32, "I32ReinterpretF32"),
-	//	(I64ReinterpretF64, "I64ReinterpretF64"),
-	//	(F32ReinterpretI32, "F32ReinterpretI32"),
-	//	(F64ReinterpretI64, "F64ReinterpretI64"),
+	// I32ReinterpretF32,
+	// I64ReinterpretF64,
+	// F32ReinterpretI32,
+	// F64ReinterpretI64,
 
-	//	(I32Extend8S, "I32Extend8S"),
-	//	(I32Extend16S, "I32Extend16S"),
-	//	(I64Extend8S, "I64Extend8S"),
-	//	(I64Extend16S, "I64Extend16S"),
-	//	(I64Extend32S, "I64Extend32S"),
-];
+	// I32Extend8S,
+	// I32Extend16S,
+	// I64Extend8S,
+	// I64Extend16S,
+	// I64Extend32S,
+}
 
-fn instruction_templates_equal(i: &Instruction, j: &Instruction) -> bool {
-	use Instruction::*;
+impl Instruction {
+	pub fn stack_pops_pushs(&self) -> (&'static [ValueType], &'static [ValueType]) {
+		use Instruction::*;
 
-	match (i, j) {
-		(I32Const(_), I32Const(_)) => true,
-		(I64Const(_), I64Const(_)) => true,
-		(GetLocal(_), GetLocal(_)) => true,
-		(SetLocal(_), SetLocal(_)) => true,
-		(TeeLocal(_), TeeLocal(_)) => true,
-		_ => i == j,
+		match self {
+			Nop => (&[], &[]),
+
+			I32Const => (&[], &[I32]),
+
+			// itestop
+			I32Eqz => (&[I32], &[I32]),
+			// irelop
+			I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS
+			| I32GeU => (&[I32, I32], &[I32]),
+			// ibinop
+			I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
+			| I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => (&[I32, I32], &[I32]),
+
+			// parametric
+			I32Drop => (&[I32], &[]),
+			I32Select => (&[I32, I32, I32], &[I32]),
+
+			// locals
+			I32GetLocal => (&[], &[I32]),
+			I32SetLocal => (&[I32], &[]),
+			I32TeeLocal => (&[], &[]),
+		}
+	}
+
+	pub fn stack_pop_push_count(&self) -> (usize, usize) {
+		let (pops, pushs) = self.stack_pops_pushs();
+		(pops.len(), pushs.len())
 	}
 }
 
-pub fn instruction_to_index(i: &Instruction) -> usize {
-	IMPLEMENTED_INSTRUCTIONS
-		.iter()
-		.position(|j| instruction_templates_equal(i, &j.0))
-		.unwrap_or_else(|| unimplemented!())
+impl From<PInstruction> for Instruction {
+	// only to be called with non-parametric instructions
+	fn from(pi: PInstruction) -> Self {
+		use PInstruction::*;
+
+		match pi {
+			Nop => Instruction::Nop,
+
+			Drop | Select | GetLocal(_) | SetLocal(_) | TeeLocal(_) => {
+				panic!("Called with parametric instruction")
+			}
+
+			I32Const(_) => Instruction::I32Const,
+
+			I32Eqz => Instruction::I32Eqz,
+			I32Eq => Instruction::I32Eq,
+			I32Ne => Instruction::I32Ne,
+			I32LtS => Instruction::I32LtS,
+			I32LtU => Instruction::I32LtU,
+			I32GtS => Instruction::I32GtS,
+			I32GtU => Instruction::I32GtU,
+			I32LeS => Instruction::I32LeS,
+			I32LeU => Instruction::I32LeU,
+			I32GeS => Instruction::I32GeS,
+			I32GeU => Instruction::I32GeU,
+
+			I32Add => Instruction::I32Add,
+			I32Sub => Instruction::I32Sub,
+			I32Mul => Instruction::I32Mul,
+			I32DivS => Instruction::I32DivS,
+			I32DivU => Instruction::I32DivU,
+			I32RemS => Instruction::I32RemS,
+			I32RemU => Instruction::I32RemU,
+			I32And => Instruction::I32And,
+			I32Or => Instruction::I32Or,
+			I32Xor => Instruction::I32Xor,
+			I32Shl => Instruction::I32Shl,
+			I32ShrS => Instruction::I32ShrS,
+			I32ShrU => Instruction::I32ShrU,
+			I32Rotl => Instruction::I32Rotl,
+			I32Rotr => Instruction::I32Rotr,
+
+			_ => unimplemented!(),
+		}
+	}
 }
 
-pub fn stack_pop_push_count(i: &Instruction) -> (usize, usize) {
-	use Instruction::*;
+impl From<Instruction> for PInstruction {
+	// only to be called with non-parametric instructions
+	fn from(i: Instruction) -> Self {
+		use Instruction::*;
+
+		match i {
+			Nop => PInstruction::Nop,
+
+			I32Drop => PInstruction::Drop,
+			I32Select => PInstruction::Select,
+			I32Const | I32GetLocal | I32SetLocal | I32TeeLocal => {
+				panic!("Called with parametric instruction")
+			}
+
+			I32Eqz => PInstruction::I32Eqz,
+			I32Eq => PInstruction::I32Eq,
+			I32Ne => PInstruction::I32Ne,
+			I32LtS => PInstruction::I32LtS,
+			I32LtU => PInstruction::I32LtU,
+			I32GtS => PInstruction::I32GtS,
+			I32GtU => PInstruction::I32GtU,
+			I32LeS => PInstruction::I32LeS,
+			I32LeU => PInstruction::I32LeU,
+			I32GeS => PInstruction::I32GeS,
+			I32GeU => PInstruction::I32GeU,
+
+			I32Add => PInstruction::I32Add,
+			I32Sub => PInstruction::I32Sub,
+			I32Mul => PInstruction::I32Mul,
+			I32DivS => PInstruction::I32DivS,
+			I32DivU => PInstruction::I32DivU,
+			I32RemS => PInstruction::I32RemS,
+			I32RemU => PInstruction::I32RemU,
+			I32And => PInstruction::I32And,
+			I32Or => PInstruction::I32Or,
+			I32Xor => PInstruction::I32Xor,
+			I32Shl => PInstruction::I32Shl,
+			I32ShrS => PInstruction::I32ShrS,
+			I32ShrU => PInstruction::I32ShrU,
+			I32Rotl => PInstruction::I32Rotl,
+			I32Rotr => PInstruction::I32Rotr,
+		}
+	}
+}
+
+// TODO this assumes stack cannot underflow
+pub fn from_parity_wasm_instructions(
+	source: &[PInstruction],
+	local_types: &[ValueType],
+) -> Vec<Instruction> {
+	let mut stack_types = Vec::new();
+	let mut target = Vec::new();
+
+	for i in source {
+		let ins = match i {
+			PInstruction::Drop => match stack_types.pop().unwrap() {
+				I32 => Instruction::I32Drop,
+				_ => unimplemented!(),
+			},
+			PInstruction::Select => {
+				assert_eq!(stack_types.pop().unwrap(), I32);
+				let (op1, op2) = (stack_types.pop().unwrap(), stack_types.pop().unwrap());
+				assert_eq!(op1, op2);
+
+				stack_types.push(op1);
+
+				match op1 {
+					I32 => Instruction::I32Select,
+					_ => unimplemented!(),
+				}
+			}
+			PInstruction::GetLocal(index) => {
+				let ty = local_types[*index as usize];
+				stack_types.push(ty);
+				match ty {
+					I32 => Instruction::I32GetLocal,
+					_ => unimplemented!(),
+				}
+			}
+			PInstruction::SetLocal(index) => {
+				let ty = local_types[*index as usize];
+				assert_eq!(ty, stack_types.pop().unwrap());
+				match ty {
+					I32 => Instruction::I32SetLocal,
+					_ => unimplemented!(),
+				}
+			}
+			PInstruction::TeeLocal(index) => match local_types[*index as usize] {
+				I32 => Instruction::I32TeeLocal,
+				_ => unimplemented!(),
+			},
+			x => {
+				let ins = Instruction::from(x.clone());
+				let (pops, pushs) = ins.stack_pops_pushs();
+				for pop in pops {
+					assert_eq!(*pop, stack_types.pop().unwrap());
+				}
+				stack_types.extend(pushs);
+				ins
+			}
+		};
+		target.push(ins);
+	}
+
+	target
+}
+
+pub fn stack_pop_push_count(i: &PInstruction) -> (usize, usize) {
+	use PInstruction::*;
 
 	match i {
 		Nop => (0, 0),
@@ -245,8 +418,16 @@ pub fn stack_pop_push_count(i: &Instruction) -> (usize, usize) {
 	}
 }
 
-pub fn iter_instructions() -> impl Iterator<Item = &'static Instruction> {
-	IMPLEMENTED_INSTRUCTIONS.iter().map(|i| &i.0)
+pub fn stack_depth(program: &[PInstruction]) -> usize {
+	let mut stack_pointer: isize = 0;
+	let mut lowest: isize = 0;
+	for i in program {
+		let (pops, pushs) = stack_pop_push_count(i);
+		let (pops, pushs) = (pops as isize, pushs as isize);
+		lowest = std::cmp::min(lowest, stack_pointer - pops);
+		stack_pointer = stack_pointer - pops + pushs;
+	}
+	lowest.abs() as usize
 }
 
 #[cfg(test)]
@@ -272,14 +453,14 @@ mod tests {
 			ast.as_usize().unwrap()
 		};
 
-		for i in iter_instructions() {
-			let (pops, pushs) = stack_pop_push_count(i);
+		for i in Instruction::into_enum_iter() {
+			let (pops, pushs) = i.stack_pop_push_count();
 			assert_eq!(
-				eval(&constants.stack_pop_count(&constants.instruction(i))),
+				eval(&constants.stack_pop_count(&constants.instruction(&i))),
 				pops
 			);
 			assert_eq!(
-				eval(&constants.stack_push_count(&constants.instruction(i))),
+				eval(&constants.stack_push_count(&constants.instruction(&i))),
 				pushs
 			);
 		}
@@ -293,13 +474,45 @@ mod tests {
 			1
 		);
 		assert_eq!(
-			eval(&constants.stack_pop_count(&constants.instruction(&Instruction::I32Const(0)))),
+			eval(&constants.stack_pop_count(&constants.instruction(&Instruction::I32Const))),
 			0
 		);
 		assert_eq!(
-			eval(&constants.stack_push_count(&constants.instruction(&Instruction::I32Const(0)))),
+			eval(&constants.stack_push_count(&constants.instruction(&Instruction::I32Const))),
 			1
 		);
 	}
 
+	#[test]
+	fn convert_test() {
+		let source = {
+			use PInstruction::*;
+			&[
+				I32Const(1),
+				I32Const(2),
+				I32Const(3),
+				Select,
+				Drop,
+				GetLocal(0),
+				TeeLocal(1),
+				SetLocal(0),
+			]
+		};
+		let local_types = &[I32, I32];
+
+		let expected = {
+			use Instruction::*;
+			vec![
+				I32Const,
+				I32Const,
+				I32Const,
+				I32Select,
+				I32Drop,
+				I32GetLocal,
+				I32TeeLocal,
+				I32SetLocal,
+			]
+		};
+		assert_eq!(expected, from_parity_wasm_instructions(source, local_types));
+	}
 }

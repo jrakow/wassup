@@ -1,6 +1,6 @@
-use crate::instructions::*;
+use crate::instructions::from_parity_wasm_instructions;
 use crate::*;
-use parity_wasm::elements::Instruction;
+use parity_wasm::elements::{Instruction as PInstruction, ValueType};
 use z3::*;
 
 pub struct State<'ctx, 'solver, 'constants> {
@@ -79,7 +79,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			.assert(&self.ctx.forall_const(&[&pc], &local_index_in_range));
 	}
 
-	pub fn set_source_program(&self, program: &[Instruction]) {
+	pub fn set_source_program(&self, source: &[PInstruction], local_types: &[ValueType]) {
+		let program = from_parity_wasm_instructions(source, local_types);
+
 		// set program_func to program
 		for (pc, instruction) in program.iter().enumerate() {
 			let instruction = self.constants.instruction(instruction);
@@ -87,8 +89,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				.assert(&self.program(&self.ctx.from_usize(pc))._eq(&instruction))
 		}
 
-		for (pc, instr) in program.iter().enumerate() {
-			use Instruction::*;
+		for (pc, instr) in source.iter().enumerate() {
+			use PInstruction::*;
 			let pc = self.ctx.from_usize(pc);
 
 			// set push_constants function
@@ -191,7 +193,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		let transitions = &[
 			// Nop: no semantics
-			&transition_instruction(&I32Const(0), &result._eq(&self.push_constants(&pc))),
+			&transition_instruction(&I32Const, &result._eq(&self.push_constants(&pc))),
 			&transition_instruction(&I32Eqz, &result._eq(&bool_to_i32(&op1._eq(&bv_zero)))),
 			&transition_instruction(&I32Eq, &result._eq(&bool_to_i32(&op2._eq(&op1)))),
 			&transition_instruction(&I32Ne, &result._eq(&bool_to_i32(&op2._eq(&op1).not()))),
@@ -223,12 +225,12 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&transition_instruction(&I32Rotl, &result._eq(&op2.bvrotl(&mod_n(&op1, 32)))),
 			&transition_instruction(&I32Rotr, &result._eq(&op2.bvrotr(&mod_n(&op1, 32)))),
 			// Drop: no semantics
-			&transition_instruction(&Select, &result._eq(&op1._eq(&bv_zero).ite(&op2, &op3))),
+			&transition_instruction(&I32Select, &result._eq(&op1._eq(&bv_zero).ite(&op2, &op3))),
 			// locals
-			&transition_instruction(&GetLocal(0), &result._eq(&current_local)),
+			&transition_instruction(&I32GetLocal, &result._eq(&current_local)),
 			// pop count is different between SetLocal and TeeLocal
-			&transition_instruction(&SetLocal(0), &next_local._eq(&op1)),
-			&transition_instruction(&TeeLocal(0), &next_local._eq(&op1)),
+			&transition_instruction(&I32SetLocal, &next_local._eq(&op1)),
+			&transition_instruction(&I32TeeLocal, &next_local._eq(&op1)),
 		];
 		self.ctx.from_bool(true).and(transitions)
 	}
@@ -260,12 +262,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let i = self.ctx.named_int_const("i");
 		let i_in_range = in_range(&self.ctx.from_usize(0), &i, &self.n_locals());
 
-		let is_setlocal = self.constants.instruction_testers
-			[instruction_to_index(&Instruction::SetLocal(0))]
-		.apply(&[&self.program(&pc)]);
-		let is_teelocal = self.constants.instruction_testers
-			[instruction_to_index(&Instruction::TeeLocal(0))]
-		.apply(&[&self.program(&pc)]);
+		let is_setlocal = self.constants.instruction_testers[Instruction::I32SetLocal as usize]
+			.apply(&[&self.program(&pc)]);
+		let is_teelocal = self.constants.instruction_testers[Instruction::I32TeeLocal as usize]
+			.apply(&[&self.program(&pc)]);
 		let is_setting_instruction = is_setlocal.or(&[&is_teelocal]);
 		let index_active = i._eq(&self.local_index(&pc));
 		let enable = is_setting_instruction.and(&[&index_active]).not();
@@ -361,6 +361,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use parity_wasm::elements::ValueType::*;
 
 	#[test]
 	fn source_program() {
@@ -368,24 +369,25 @@ mod tests {
 		let solver = Solver::new(&ctx);
 
 		let program = &[
-			Instruction::I32Const(1),
-			Instruction::Nop,
-			Instruction::I32Const(2),
-			Instruction::I32Add,
+			PInstruction::I32Const(1),
+			PInstruction::Nop,
+			PInstruction::I32Const(2),
+			PInstruction::I32Add,
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 
 		assert!(solver.check());
 		let model = solver.get_model();
 
+		let program = from_parity_wasm_instructions(program, &[]);
+
 		for (i, instr) in program.iter().enumerate() {
 			let instr_enc = state.program(&ctx.from_usize(i));
-			let is_equal =
-				constants.instruction_testers[instruction_to_index(instr)].apply(&[&instr_enc]);
+			let is_equal = constants.instruction_testers[*instr as usize].apply(&[&instr_enc]);
 			let b = model.eval(&is_equal).unwrap().as_bool().unwrap();
 			assert!(b);
 		}
@@ -397,15 +399,15 @@ mod tests {
 		let solver = Solver::new(&ctx);
 
 		let program = &[
-			Instruction::I32Const(1),
-			Instruction::I32Const(2),
-			Instruction::I32Add,
+			PInstruction::I32Const(1),
+			PInstruction::I32Const(2),
+			PInstruction::I32Add,
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -421,15 +423,15 @@ mod tests {
 		let solver = Solver::new(&ctx);
 
 		let program = &[
-			Instruction::I32Const(1),
-			Instruction::I32Const(2),
-			Instruction::I32Add,
+			PInstruction::I32Const(1),
+			PInstruction::I32Const(2),
+			PInstruction::I32Add,
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 
 		state.assert_transitions();
 
@@ -451,12 +453,12 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
+		let program = &[PInstruction::I32Const(1), PInstruction::I32Const(2)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -474,12 +476,12 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[Instruction::I32Const(1)];
+		let program = &[PInstruction::I32Const(1)];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 
 		state.assert_transitions();
 
@@ -508,16 +510,16 @@ mod tests {
 		let solver = Solver::new(&ctx);
 
 		let program = &[
-			Instruction::I32Const(1),
-			Instruction::Nop,
-			Instruction::I32Const(2),
-			Instruction::I32Add,
+			PInstruction::I32Const(1),
+			PInstruction::Nop,
+			PInstruction::I32Const(2),
+			PInstruction::I32Add,
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 
 		state.assert_transitions();
 
@@ -551,16 +553,17 @@ mod tests {
 	}
 
 	#[test]
+	#[ignore]
 	fn transition_add() {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[Instruction::I32Add];
+		let program = &[PInstruction::I32Add];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 
 		state.assert_transitions();
 
@@ -583,11 +586,11 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[Instruction::I32Const(1), Instruction::Drop];
+		let program = &[PInstruction::I32Const(1), PInstruction::Drop];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 		state.assert_transitions();
 
 		assert!(solver.check());
@@ -609,15 +612,15 @@ mod tests {
 		let solver = Solver::new(&ctx);
 
 		let program = &[
-			Instruction::I32Const(1),
-			Instruction::I32Const(2),
-			Instruction::I32Const(3),
-			Instruction::Select,
+			PInstruction::I32Const(1),
+			PInstruction::I32Const(2),
+			PInstruction::I32Const(3),
+			PInstruction::Select,
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 		state.assert_transitions();
 
 		assert!(solver.check());
@@ -651,15 +654,15 @@ mod tests {
 		let solver = Solver::new(&ctx);
 
 		let program = &[
-			Instruction::I32Const(1),
-			Instruction::I32Const(2),
-			Instruction::I32Const(0),
-			Instruction::Select,
+			PInstruction::I32Const(1),
+			PInstruction::I32Const(2),
+			PInstruction::I32Const(0),
+			PInstruction::Select,
 		];
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
-		state.set_source_program(program);
+		state.set_source_program(program, &[]);
 		state.assert_transitions();
 
 		assert!(solver.check());
@@ -689,7 +692,7 @@ mod tests {
 
 	#[test]
 	fn transition_local() {
-		use Instruction::*;
+		use PInstruction::*;
 
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
@@ -710,7 +713,7 @@ mod tests {
 
 		let constants = Constants::new(&ctx, &solver, stack_depth(program), 2);
 		let state = State::new(&ctx, &solver, &constants, "");
-		state.set_source_program(program);
+		state.set_source_program(program, &[I32, I32, I32]);
 		state.assert_transitions();
 		constants.set_params(&solver, &[1, 2]);
 

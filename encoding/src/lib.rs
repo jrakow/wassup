@@ -4,25 +4,11 @@ mod state;
 
 pub use crate::{
 	constants::Constants,
-	instructions::{instruction_to_index, iter_instructions},
+	instructions::{from_parity_wasm_instructions, stack_depth, Instruction},
 	state::State,
 };
 
-use crate::instructions::stack_pop_push_count;
-use parity_wasm::elements::Instruction;
 use z3::*;
-
-pub fn stack_depth(program: &[Instruction]) -> usize {
-	let mut stack_pointer: isize = 0;
-	let mut lowest: isize = 0;
-	for i in program {
-		let (pops, pushs) = stack_pop_push_count(i);
-		let (pops, pushs) = (pops as isize, pushs as isize);
-		lowest = std::cmp::min(lowest, stack_pointer - pops);
-		stack_pointer = stack_pointer - pops + pushs;
-	}
-	lowest.abs() as usize
-}
 
 pub fn in_range<'ctx>(a: &Ast<'ctx>, b: &Ast<'ctx>, c: &Ast<'ctx>) -> Ast<'ctx> {
 	a.le(&b).and(&[&b.lt(&c)])
@@ -57,23 +43,24 @@ pub fn equivalent<'ctx>(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use parity_wasm::elements::Instruction as PInstruction;
 
 	#[test]
 	fn stack_depth_test() {
 		let program = &[];
 		assert_eq!(stack_depth(program), 0);
 
-		let program = &[Instruction::I32Add];
+		let program = &[PInstruction::I32Add];
 		assert_eq!(stack_depth(program), 2);
 
-		let program = &[Instruction::I32Const(1), Instruction::I32Add];
+		let program = &[PInstruction::I32Const(1), PInstruction::I32Add];
 		assert_eq!(stack_depth(program), 1);
 
 		let program = &[
-			Instruction::I32Const(1),
-			Instruction::I32Const(1),
-			Instruction::I32Const(1),
-			Instruction::I32Add,
+			PInstruction::I32Const(1),
+			PInstruction::I32Const(1),
+			PInstruction::I32Const(1),
+			PInstruction::I32Add,
 		];
 		assert_eq!(stack_depth(program), 0);
 	}

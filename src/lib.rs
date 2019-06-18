@@ -1,6 +1,7 @@
 use crate::block::flat_blocks_mut;
+use enum_iterator::IntoEnumIterator;
 use parity_wasm::elements::{
-	CodeSection, FunctionSection, Instruction, Type, TypeSection, ValueType,
+	CodeSection, FunctionSection, Instruction as PInstruction, Type, TypeSection, ValueType,
 };
 use rayon::prelude::*;
 use wassup_encoding::*;
@@ -8,25 +9,27 @@ use z3::*;
 
 mod block;
 
-pub fn superoptimize_instructions(
-	source_program: &[Instruction],
-	n_params: usize,
-) -> Vec<Instruction> {
-	superoptimize_impl(source_program, n_params)
-}
-
 pub fn superoptimize_func_body(
 	func_body: &mut parity_wasm::elements::FuncBody,
 	params: &[ValueType],
 ) {
 	let n_params = params.len();
+	let local_types = {
+		let mut v = Vec::new();
+		for local in func_body.locals() {
+			for _ in 0..local.count() {
+				v.push(local.value_type())
+			}
+		}
+		v
+	};
 
 	let code = func_body.code_mut().elements_mut();
 	let mut blocks = block::parse_blocks(code);
 	let flat_blocks = flat_blocks_mut(&mut blocks);
 	for flat_block in flat_blocks {
 		let instructions = &flat_block[..];
-		*flat_block = superoptimize_instructions(instructions, n_params);
+		*flat_block = superoptimize_impl(instructions, n_params, &local_types);
 	}
 	*code = block::serialize(&blocks);
 }
@@ -60,7 +63,11 @@ pub fn superoptimize_module(module: &mut parity_wasm::elements::Module) {
 		});
 }
 
-fn superoptimize_impl(source_program: &[Instruction], n_params: usize) -> Vec<Instruction> {
+fn superoptimize_impl(
+	source_program: &[PInstruction],
+	n_params: usize,
+	local_types: &[ValueType],
+) -> Vec<PInstruction> {
 	let config = Config::default();
 	let ctx = Context::new(&config);
 	let solver = Solver::new(&ctx);
@@ -68,12 +75,12 @@ fn superoptimize_impl(source_program: &[Instruction], n_params: usize) -> Vec<In
 	let constants = Constants::new(
 		&ctx,
 		&solver,
-		stack_depth(source_program) as usize,
+		stack_depth(&source_program) as usize,
 		n_params,
 	);
 	let source_state = State::new(&ctx, &solver, &constants, "source_");
 	let target_state = State::new(&ctx, &solver, &constants, "target_");
-	source_state.set_source_program(source_program);
+	source_state.set_source_program(source_program, local_types);
 
 	source_state.assert_transitions();
 	target_state.assert_transitions();
@@ -123,8 +130,8 @@ fn superoptimize_impl(source_program: &[Instruction], n_params: usize) -> Vec<In
 		for i in 0..target_length {
 			let encoded_instr = model.eval(&target_state.program(&ctx.from_i64(i))).unwrap();
 
-			for instr in iter_instructions() {
-				let equal_tester = &constants.instruction_testers[instruction_to_index(instr)];
+			for instr in Instruction::into_enum_iter() {
+				let equal_tester = &constants.instruction_testers[instr as usize];
 				let equal = model
 					.eval(&equal_tester.apply(&[&encoded_instr]))
 					.unwrap()
@@ -132,15 +139,33 @@ fn superoptimize_impl(source_program: &[Instruction], n_params: usize) -> Vec<In
 					.unwrap();
 
 				if equal {
-					// TODO decode *Local
-					let decoded = if let Instruction::I32Const(_) = instr {
-						let push_constant_ast = target_state.push_constants(&ctx.from_i64(i));
-						let push_constant =
-							model.eval(&push_constant_ast).unwrap().as_i64().unwrap();
-						// TODO fix cast
-						Instruction::I32Const(push_constant as i32)
-					} else {
-						instr.clone()
+					let pc = ctx.from_i64(i);
+					let decoded = match instr {
+						Instruction::I32Const => {
+							let push_constant_ast = target_state.push_constants(&pc);
+							let push_constant =
+								model.eval(&push_constant_ast).unwrap().as_i32().unwrap();
+							PInstruction::I32Const(push_constant)
+						}
+						Instruction::I32GetLocal => {
+							let local_index_ast = target_state.local_index(&pc);
+							let local_index =
+								model.eval(&local_index_ast).unwrap().as_u32().unwrap();
+							PInstruction::GetLocal(local_index)
+						}
+						Instruction::I32SetLocal => {
+							let local_index_ast = target_state.local_index(&pc);
+							let local_index =
+								model.eval(&local_index_ast).unwrap().as_u32().unwrap();
+							PInstruction::GetLocal(local_index)
+						}
+						Instruction::I32TeeLocal => {
+							let local_index_ast = target_state.local_index(&pc);
+							let local_index =
+								model.eval(&local_index_ast).unwrap().as_u32().unwrap();
+							PInstruction::GetLocal(local_index)
+						}
+						x => PInstruction::from(x),
 					};
 
 					target_program.push(decoded);
@@ -159,44 +184,46 @@ fn superoptimize_impl(source_program: &[Instruction], n_params: usize) -> Vec<In
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use ValueType::*;
 
 	#[test]
 	fn superoptimize_nop() {
-		let source_program = &[Instruction::I32Const(1), Instruction::Nop];
-		let target = superoptimize_impl(source_program, 0);
-		assert_eq!(target, vec![Instruction::I32Const(1)]);
+		let source_program = &[PInstruction::I32Const(1), PInstruction::Nop];
+		let target = superoptimize_impl(source_program, 0, &[]);
+		assert_eq!(target, vec![PInstruction::I32Const(1)]);
 	}
 
 	#[test]
 	fn superoptimize_consts_add() {
 		let source_program = &[
-			Instruction::I32Const(1),
-			Instruction::I32Const(2),
-			Instruction::I32Add,
+			PInstruction::I32Const(1),
+			PInstruction::I32Const(2),
+			PInstruction::I32Add,
 		];
-		let target = superoptimize_impl(source_program, 0);
-		assert_eq!(target, vec![Instruction::I32Const(3)]);
+		let target = superoptimize_impl(source_program, 0, &[]);
+		assert_eq!(target, vec![PInstruction::I32Const(3)]);
 	}
 
 	#[test]
+	#[ignore]
 	fn superoptimize_add() {
-		let source_program = &[Instruction::I32Const(0), Instruction::I32Add];
-		let target = superoptimize_impl(source_program, 0);
+		let source_program = &[PInstruction::I32Const(0), PInstruction::I32Add];
+		let target = superoptimize_impl(source_program, 0, &[]);
 		assert_eq!(target, vec![]);
 	}
 
 	#[test]
 	fn superoptimize_setlocal_0() {
-		let source_program = &[Instruction::I32Const(0), Instruction::SetLocal(0)];
-		let target = superoptimize_impl(source_program, 0);
+		let source_program = &[PInstruction::I32Const(0), PInstruction::SetLocal(0)];
+		let target = superoptimize_impl(source_program, 0, &[I32]);
 		assert_eq!(target, vec![]);
 	}
 
 	#[test]
 	#[ignore] // TODO
 	fn no_superoptimize_setlocal() {
-		let source_program = &[Instruction::I32Const(3), Instruction::SetLocal(0)];
-		let target = superoptimize_impl(source_program, 1);
+		let source_program = &[PInstruction::I32Const(3), PInstruction::SetLocal(0)];
+		let target = superoptimize_impl(source_program, 1, &[I32]);
 		assert_eq!(target, source_program);
 	}
 }

@@ -5,6 +5,7 @@ authors = ["Julius Rakow <julius@rakow.me>"]
 edition = "2018"
 
 [dependencies]
+enum-iterator = "0.3.0"
 parity-wasm = "0.38.0"
 z3 = { path = "../../z3.rs/z3" }
 

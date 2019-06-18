@@ -1,5 +1,5 @@
 use crate::instructions::*;
-use parity_wasm::elements::Instruction;
+use enum_iterator::IntoEnumIterator;
 use z3::*;
 
 pub struct Constants<'ctx> {
@@ -20,10 +20,8 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		n_params: usize,
 	) -> Self {
 		let word_sort = ctx.bitvector_sort(32);
-		let instruction_names: Vec<_> = IMPLEMENTED_INSTRUCTIONS
-			.iter()
-			.map(|i| i.1)
-			.map(|s| ctx.str_sym(s))
+		let instruction_names: Vec<_> = Instruction::into_enum_iter()
+			.map(|s| ctx.str_sym(&format!("{:?}", s)))
 			.collect();
 		let (instruction_sort, instruction_consts, instruction_testers) = ctx.enumeration_sort(
 			&ctx.str_sym("Instruction"),
@@ -46,8 +44,8 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			stack_depth,
 		};
 
-		for i in iter_instructions() {
-			let (pops, pushs) = stack_pop_push_count(i);
+		for ref i in Instruction::into_enum_iter() {
+			let (pops, pushs) = i.stack_pop_push_count();
 			solver.assert(
 				&constants
 					.stack_pop_count(&constants.instruction(i))
@@ -64,7 +62,7 @@ impl<'ctx, 'solver> Constants<'ctx> {
 	}
 
 	pub fn instruction(&self, i: &Instruction) -> Ast<'ctx> {
-		self.instruction_consts[instruction_to_index(i)].apply(&[])
+		self.instruction_consts[*i as usize].apply(&[])
 	}
 
 	pub fn stack_pop_count(&self, instr: &Ast<'ctx>) -> Ast<'ctx> {
