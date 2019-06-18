@@ -1,4 +1,5 @@
 use clap::{crate_authors, crate_description, crate_version, App, Arg, ArgMatches};
+use parity_wasm::{self, deserialize_buffer, elements::Module, serialize};
 use std::{
 	ffi::OsStr,
 	fs::File,
@@ -7,7 +8,6 @@ use std::{
 	process::exit,
 };
 use wabt::wat2wasm;
-use wassup::parity_wasm::{self, deserialize_buffer, elements::Module, serialize};
 
 fn main() {
 	let args = App::new("wassup")

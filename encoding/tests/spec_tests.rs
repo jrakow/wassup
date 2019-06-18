@@ -1,7 +1,8 @@
-use super::*;
 use parity_wasm::elements::{Internal, Module, Type};
 use std::{collections::HashMap, fs::read};
 use wabt::script::{Action, Action::*, Command, CommandKind, ScriptParser, Value};
+use wassup_encoding::*;
+use z3::*;
 
 #[test]
 fn test_i32() {
@@ -9,7 +10,7 @@ fn test_i32() {
 }
 
 fn spec_test(name: &str) {
-	let source = read("src/encoding/spec_tests/".to_owned() + name).unwrap();
+	let source = read("tests/spec_tests/".to_owned() + name).unwrap();
 
 	let mut parser: ScriptParser<f32, f64> =
 		ScriptParser::from_source_and_name(&source, name).unwrap();
