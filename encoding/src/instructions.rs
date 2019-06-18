@@ -327,8 +327,9 @@ impl From<Instruction> for PInstruction {
 pub fn from_parity_wasm_instructions(
 	source: &[PInstruction],
 	local_types: &[ValueType],
+	initial_stack: &[ValueType],
 ) -> Vec<Instruction> {
-	let mut stack_types = Vec::new();
+	let mut stack_types = initial_stack.to_vec();
 	let mut target = Vec::new();
 
 	for i in source {
@@ -443,7 +444,7 @@ mod tests {
 			Context::new(&cfg)
 		};
 		let solver = Solver::new(&ctx);
-		let constants = Constants::new(&ctx, &solver, 0, 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -513,6 +514,9 @@ mod tests {
 				I32SetLocal,
 			]
 		};
-		assert_eq!(expected, from_parity_wasm_instructions(source, local_types));
+		assert_eq!(
+			expected,
+			from_parity_wasm_instructions(source, local_types, &[])
+		);
 	}
 }

@@ -39,11 +39,13 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			);
 		}
 
-		// set stack_counter(0) = 0
+		// set stack_counter(0) = initial_stack.len()
 		self.solver.assert(
-			&self
-				.stack_pointer(&self.ctx.from_usize(0))
-				._eq(&self.ctx.from_usize(self.constants.stack_depth)),
+			&self.stack_pointer(&self.ctx.from_usize(0))._eq(
+				&self
+					.ctx
+					.from_usize(self.constants.initial_stack_types.len()),
+			),
 		);
 
 		// set params
@@ -80,7 +82,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	pub fn set_source_program(&self, source: &[PInstruction], local_types: &[ValueType]) {
-		let program = from_parity_wasm_instructions(source, local_types);
+		let program =
+			from_parity_wasm_instructions(source, local_types, &self.constants.initial_stack_types);
 
 		// set program_func to program
 		for (pc, instruction) in program.iter().enumerate() {
@@ -375,7 +378,7 @@ mod tests {
 			PInstruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program, &[]);
@@ -383,7 +386,7 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
-		let program = from_parity_wasm_instructions(program, &[]);
+		let program = from_parity_wasm_instructions(program, &[], &[]);
 
 		for (i, instr) in program.iter().enumerate() {
 			let instr_enc = state.program(&ctx.from_usize(i));
@@ -404,7 +407,7 @@ mod tests {
 			PInstruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program, &[]);
@@ -428,7 +431,7 @@ mod tests {
 			PInstruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program, &[]);
@@ -455,7 +458,7 @@ mod tests {
 
 		let program = &[PInstruction::I32Const(1), PInstruction::I32Const(2)];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program, &[]);
@@ -478,7 +481,7 @@ mod tests {
 
 		let program = &[PInstruction::I32Const(1)];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program, &[]);
@@ -516,7 +519,7 @@ mod tests {
 			PInstruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program, &[]);
@@ -553,14 +556,13 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
 	fn transition_add() {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
 		let program = &[PInstruction::I32Add];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[I32, I32]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program, &[]);
@@ -588,7 +590,7 @@ mod tests {
 
 		let program = &[PInstruction::I32Const(1), PInstruction::Drop];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program, &[]);
 		state.assert_transitions();
@@ -618,7 +620,7 @@ mod tests {
 			PInstruction::Select,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program, &[]);
 		state.assert_transitions();
@@ -660,7 +662,7 @@ mod tests {
 			PInstruction::Select,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
+		let constants = Constants::new(&ctx, &solver, 0, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program, &[]);
 		state.assert_transitions();
@@ -711,7 +713,7 @@ mod tests {
 			SetLocal(0),
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program), 2);
+		let constants = Constants::new(&ctx, &solver, 2, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program, &[I32, I32, I32]);
 		state.assert_transitions();

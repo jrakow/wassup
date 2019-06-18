@@ -1,5 +1,6 @@
 use crate::instructions::*;
 use enum_iterator::IntoEnumIterator;
+use parity_wasm::elements::ValueType;
 use z3::*;
 
 pub struct Constants<'ctx> {
@@ -8,16 +9,16 @@ pub struct Constants<'ctx> {
 	pub instruction_consts: Vec<FuncDecl<'ctx>>,
 	pub instruction_testers: Vec<FuncDecl<'ctx>>,
 	pub initial_stack: Vec<Ast<'ctx>>,
+	pub initial_stack_types: Vec<ValueType>,
 	pub params: Vec<Ast<'ctx>>,
-	pub stack_depth: usize,
 }
 
 impl<'ctx, 'solver> Constants<'ctx> {
 	pub fn new(
 		ctx: &'ctx Context,
 		solver: &Solver<'ctx>,
-		stack_depth: usize,
 		n_params: usize,
+		initial_stack_types: &[ValueType],
 	) -> Self {
 		let word_sort = ctx.bitvector_sort(32);
 		let instruction_names: Vec<_> = Instruction::into_enum_iter()
@@ -27,7 +28,7 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			&ctx.str_sym("Instruction"),
 			&instruction_names.iter().collect::<Vec<_>>()[..],
 		);
-		let initial_stack: Vec<_> = (0..stack_depth)
+		let initial_stack: Vec<_> = (0..initial_stack_types.len())
 			.map(|_| ctx.fresh_const("initial_stack", &word_sort))
 			.collect();
 		let params: Vec<_> = (0..n_params)
@@ -40,8 +41,8 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			instruction_consts,
 			instruction_testers,
 			initial_stack,
+			initial_stack_types: initial_stack_types.to_vec(),
 			params,
-			stack_depth,
 		};
 
 		for ref i in Instruction::into_enum_iter() {

@@ -29,7 +29,8 @@ pub fn superoptimize_func_body(
 	let flat_blocks = flat_blocks_mut(&mut blocks);
 	for flat_block in flat_blocks {
 		let instructions = &flat_block[..];
-		*flat_block = superoptimize_impl(instructions, n_params, &local_types);
+		// TODO keep track of stack types
+		*flat_block = superoptimize_impl(instructions, n_params, &local_types, &[]);
 	}
 	*code = block::serialize(&blocks);
 }
@@ -67,17 +68,13 @@ fn superoptimize_impl(
 	source_program: &[PInstruction],
 	n_params: usize,
 	local_types: &[ValueType],
+	initial_stack: &[ValueType],
 ) -> Vec<PInstruction> {
 	let config = Config::default();
 	let ctx = Context::new(&config);
 	let solver = Solver::new(&ctx);
 
-	let constants = Constants::new(
-		&ctx,
-		&solver,
-		stack_depth(&source_program) as usize,
-		n_params,
-	);
+	let constants = Constants::new(&ctx, &solver, n_params, initial_stack);
 	let source_state = State::new(&ctx, &solver, &constants, "source_");
 	let target_state = State::new(&ctx, &solver, &constants, "target_");
 	source_state.set_source_program(source_program, local_types);
@@ -189,7 +186,7 @@ mod tests {
 	#[test]
 	fn superoptimize_nop() {
 		let source_program = &[PInstruction::I32Const(1), PInstruction::Nop];
-		let target = superoptimize_impl(source_program, 0, &[]);
+		let target = superoptimize_impl(source_program, 0, &[], &[]);
 		assert_eq!(target, vec![PInstruction::I32Const(1)]);
 	}
 
@@ -200,22 +197,21 @@ mod tests {
 			PInstruction::I32Const(2),
 			PInstruction::I32Add,
 		];
-		let target = superoptimize_impl(source_program, 0, &[]);
+		let target = superoptimize_impl(source_program, 0, &[], &[]);
 		assert_eq!(target, vec![PInstruction::I32Const(3)]);
 	}
 
 	#[test]
-	#[ignore]
 	fn superoptimize_add() {
 		let source_program = &[PInstruction::I32Const(0), PInstruction::I32Add];
-		let target = superoptimize_impl(source_program, 0, &[]);
+		let target = superoptimize_impl(source_program, 0, &[], &[I32]);
 		assert_eq!(target, vec![]);
 	}
 
 	#[test]
 	fn superoptimize_setlocal_0() {
 		let source_program = &[PInstruction::I32Const(0), PInstruction::SetLocal(0)];
-		let target = superoptimize_impl(source_program, 0, &[I32]);
+		let target = superoptimize_impl(source_program, 0, &[I32], &[]);
 		assert_eq!(target, vec![]);
 	}
 
@@ -223,7 +219,7 @@ mod tests {
 	#[ignore] // TODO
 	fn no_superoptimize_setlocal() {
 		let source_program = &[PInstruction::I32Const(3), PInstruction::SetLocal(0)];
-		let target = superoptimize_impl(source_program, 1, &[I32]);
+		let target = superoptimize_impl(source_program, 1, &[I32], &[]);
 		assert_eq!(target, source_program);
 	}
 }
