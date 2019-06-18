@@ -123,7 +123,7 @@ fn superoptimize_impl(source_program: &[Instruction], n_params: usize) -> Vec<In
 		for i in 0..target_length {
 			let encoded_instr = model.eval(&target_state.program(&ctx.from_i64(i))).unwrap();
 
-			for instr in iter_intructions() {
+			for instr in iter_instructions() {
 				let equal_tester = &constants.instruction_testers[instruction_to_index(instr)];
 				let equal = model
 					.eval(&equal_tester.apply(&[&encoded_instr]))
