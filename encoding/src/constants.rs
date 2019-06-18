@@ -51,12 +51,12 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			solver.assert(
 				&constants
 					.stack_pop_count(&constants.instruction(i))
-					._eq(&ctx.from_u64(pops)),
+					._eq(&ctx.from_usize(pops)),
 			);
 			solver.assert(
 				&constants
 					.stack_push_count(&constants.instruction(i))
-					._eq(&ctx.from_u64(pushs)),
+					._eq(&ctx.from_usize(pushs)),
 			);
 		}
 
@@ -89,7 +89,7 @@ impl<'ctx, 'solver> Constants<'ctx> {
 
 	pub fn set_params(&self, solver: &Solver, params: &[u32]) {
 		for (i, v) in params.iter().enumerate() {
-			let v = self.ctx.from_u64(*v as _).int2bv(32);
+			let v = self.ctx.from_u32(*v).int2bv(32);
 
 			solver.assert(&self.params[i]._eq(&v));
 		}

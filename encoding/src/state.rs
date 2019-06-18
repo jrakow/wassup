@@ -34,7 +34,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
 			self.solver.assert(
 				&self
-					.stack(&self.ctx.from_u64(0), &self.ctx.from_u64(i as _))
+					.stack(&self.ctx.from_usize(0), &self.ctx.from_usize(i))
 					._eq(&var),
 			);
 		}
@@ -42,36 +42,36 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// set stack_counter(0) = 0
 		self.solver.assert(
 			&self
-				.stack_pointer(&self.ctx.from_u64(0))
-				._eq(&self.ctx.from_u64(self.constants.stack_depth as _)),
+				.stack_pointer(&self.ctx.from_usize(0))
+				._eq(&self.ctx.from_usize(self.constants.stack_depth)),
 		);
 
 		// set params
 		for (i, var) in self.constants.params.iter().enumerate() {
 			self.solver.assert(
 				&self
-					.local(&self.ctx.from_u64(0), &self.ctx.from_u64(i as _))
+					.local(&self.ctx.from_usize(0), &self.ctx.from_usize(i))
 					._eq(&var),
 			);
 		}
 
 		// force n_locals to be >= n_params
-		let n_params = self.ctx.from_u64(self.constants.params.len() as _);
+		let n_params = self.ctx.from_usize(self.constants.params.len());
 		self.solver.assert(&self.n_locals().ge(&n_params));
 
 		// set remaining locals to 0
 		let n = self.ctx.named_int_const("n");
-		let bv_zero = self.ctx.from_u64(0).int2bv(32);
+		let bv_zero = self.ctx.from_usize(0).int2bv(32);
 		let n_in_range = in_range(&n_params, &n, &self.n_locals());
 		self.solver.assert(&self.ctx.forall_const(
 			&[&n],
-			&n_in_range.implies(&self.local(&self.ctx.from_u64(0), &n)._eq(&bv_zero)),
+			&n_in_range.implies(&self.local(&self.ctx.from_usize(0), &n)._eq(&bv_zero)),
 		));
 
 		// constrain 0 <= local_index <= n_locals
 		let pc = self.ctx.named_int_const("pc");
 		let local_index_in_range = in_range(
-			&self.ctx.from_u64(0),
+			&self.ctx.from_usize(0),
 			&self.local_index(&pc),
 			&self.n_locals(),
 		);
@@ -84,22 +84,22 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		for (pc, instruction) in program.iter().enumerate() {
 			let instruction = self.constants.instruction(instruction);
 			self.solver
-				.assert(&self.program(&self.ctx.from_u64(pc as _))._eq(&instruction))
+				.assert(&self.program(&self.ctx.from_usize(pc))._eq(&instruction))
 		}
 
 		for (pc, instr) in program.iter().enumerate() {
 			use Instruction::*;
-			let pc = self.ctx.from_u64(pc as _);
+			let pc = self.ctx.from_usize(pc);
 
 			// set push_constants function
 			match instr {
-				I32Const(ref i) => {
-					let i = self.ctx.from_i64(*i as _).int2bv(32);
+				I32Const(i) => {
+					let i = self.ctx.from_i32(*i).int2bv(32);
 					self.solver.assert(&self.push_constants(&pc)._eq(&i));
 				}
 				GetLocal(i) | SetLocal(i) | TeeLocal(i) => {
 					self.solver
-						.assert(&self.local_index(&pc)._eq(&self.ctx.from_u64(*i as _)));
+						.assert(&self.local_index(&pc)._eq(&self.ctx.from_u32(*i)));
 				}
 				_ => {}
 			}
@@ -109,13 +109,13 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		self.solver.assert(
 			&self
 				.program_length()
-				._eq(&self.ctx.from_u64(program.len() as u64)),
+				._eq(&self.ctx.from_usize(program.len())),
 		);
 	}
 
 	pub fn assert_transitions(&self) {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = in_range(&self.ctx.from_u64(0), &pc, &self.program_length());
+		let pc_in_range = in_range(&self.ctx.from_usize(0), &pc, &self.program_length());
 
 		// forall initial_stack values and all params and all pcs
 		let mut bounds: Vec<_> = self
@@ -145,7 +145,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn transition_stack_pointer(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		// encode stack_pointer change
 		let stack_pointer = self.stack_pointer(&pc);
-		let stack_pointer_next = self.stack_pointer(&pc.add(&[&self.ctx.from_u64(1)]));
+		let stack_pointer_next = self.stack_pointer(&pc.add(&[&self.ctx.from_usize(1)]));
 
 		let instruction = self.program(&pc);
 		let pop_count = self.constants.stack_pop_count(&instruction);
@@ -168,15 +168,15 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// ad-hoc conversions
 		let bool_to_i32 = |b: &Ast<'ctx>| {
 			b.ite(
-				&self.ctx.from_u64(1).int2bv(32),
-				&self.ctx.from_u64(0).int2bv(32),
+				&self.ctx.from_usize(1).int2bv(32),
+				&self.ctx.from_usize(0).int2bv(32),
 			)
 		};
-		let mod_n = |b: &Ast<'ctx>, n: u64| b.bvurem(&self.ctx.from_u64(n).int2bv(32));
+		let mod_n = |b: &Ast<'ctx>, n: usize| b.bvurem(&self.ctx.from_usize(n).int2bv(32));
 
 		// constants
-		let bv_zero = self.ctx.from_u64(0).int2bv(32);
-		let pc_next = &pc.add(&[&self.ctx.from_u64(1)]);
+		let bv_zero = self.ctx.from_usize(0).int2bv(32);
+		let pc_next = &pc.add(&[&self.ctx.from_usize(1)]);
 
 		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
 		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
@@ -242,13 +242,13 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let n = self.ctx.named_int_const("n");
 
 		let n_in_range = in_range(
-			&self.ctx.from_u64(0),
+			&self.ctx.from_usize(0),
 			&n,
 			&stack_pointer.sub(&[&self.constants.stack_pop_count(&instr)]),
 		);
 		let slot_preserved = self
 			.stack(&pc, &n)
-			._eq(&self.stack(&pc.add(&[&self.ctx.from_u64(1)]), &n));
+			._eq(&self.stack(&pc.add(&[&self.ctx.from_usize(1)]), &n));
 
 		// forall n
 		self.ctx
@@ -258,7 +258,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	fn preserve_locals(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		// preserve all locals which are not set in this step
 		let i = self.ctx.named_int_const("i");
-		let i_in_range = in_range(&self.ctx.from_u64(0), &i, &self.n_locals());
+		let i_in_range = in_range(&self.ctx.from_usize(0), &i, &self.n_locals());
 
 		let is_setlocal = self.constants.instruction_testers
 			[instruction_to_index(&Instruction::SetLocal(0))]
@@ -270,7 +270,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let index_active = i._eq(&self.local_index(&pc));
 		let enable = is_setting_instruction.and(&[&index_active]).not();
 
-		let pc_next = pc.add(&[&self.ctx.from_u64(1)]);
+		let pc_next = pc.add(&[&self.ctx.from_usize(1)]);
 
 		self.ctx.forall_const(
 			&[&i],
@@ -374,7 +374,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -383,7 +383,7 @@ mod tests {
 		let model = solver.get_model();
 
 		for (i, instr) in program.iter().enumerate() {
-			let instr_enc = state.program(&ctx.from_u64(i as u64));
+			let instr_enc = state.program(&ctx.from_usize(i));
 			let is_equal =
 				constants.instruction_testers[instruction_to_index(instr)].apply(&[&instr_enc]);
 			let b = model.eval(&is_equal).unwrap().as_bool().unwrap();
@@ -402,7 +402,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -410,7 +410,7 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
-		let stack_pointer = state.stack_pointer(&ctx.from_u64(0));
+		let stack_pointer = state.stack_pointer(&ctx.from_usize(0));
 		let stack_pointer = model.eval(&stack_pointer).unwrap().as_i64().unwrap();
 		assert_eq!(stack_pointer, 0);
 	}
@@ -426,7 +426,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -440,10 +440,10 @@ mod tests {
 			let evaled = model.eval(&ast).unwrap();
 			evaled.as_i64().unwrap()
 		};
-		assert_eq!(eval(state.stack_pointer(&ctx.from_u64(0))), 0);
-		assert_eq!(eval(state.stack_pointer(&ctx.from_u64(1))), 1);
-		assert_eq!(eval(state.stack_pointer(&ctx.from_u64(2))), 2);
-		assert_eq!(eval(state.stack_pointer(&ctx.from_u64(3))), 1);
+		assert_eq!(eval(state.stack_pointer(&ctx.from_usize(0))), 0);
+		assert_eq!(eval(state.stack_pointer(&ctx.from_usize(1))), 1);
+		assert_eq!(eval(state.stack_pointer(&ctx.from_usize(2))), 2);
+		assert_eq!(eval(state.stack_pointer(&ctx.from_usize(3))), 1);
 	}
 
 	#[test]
@@ -453,7 +453,7 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1), Instruction::I32Const(2)];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -465,8 +465,8 @@ mod tests {
 			let evaled = model.eval(&ast).unwrap();
 			evaled.as_i64().unwrap()
 		};
-		assert_eq!(eval(state.push_constants(&ctx.from_u64(0))), 1);
-		assert_eq!(eval(state.push_constants(&ctx.from_u64(1))), 2);
+		assert_eq!(eval(state.push_constants(&ctx.from_usize(0))), 1);
+		assert_eq!(eval(state.push_constants(&ctx.from_usize(1))), 2);
 	}
 
 	#[test]
@@ -476,7 +476,7 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1)];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -490,13 +490,16 @@ mod tests {
 			let evaled = model.eval(ast).unwrap();
 			evaled.as_i64().unwrap()
 		};
-		assert_eq!(eval_int(&state.stack_pointer(&ctx.from_u64(1))), 1);
+		assert_eq!(eval_int(&state.stack_pointer(&ctx.from_usize(1))), 1);
 
 		let eval_bv = |ast: &Ast| -> i64 {
 			let evaled = model.eval(&ast.bv2int(true)).unwrap();
 			evaled.as_i64().unwrap()
 		};
-		assert_eq!(eval_bv(&state.stack(&ctx.from_u64(1), &ctx.from_u64(0))), 1);
+		assert_eq!(
+			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
+			1
+		);
 	}
 
 	#[test]
@@ -511,7 +514,7 @@ mod tests {
 			Instruction::I32Add,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -525,11 +528,26 @@ mod tests {
 			let evaled = model.eval(&ast.bv2int(true)).unwrap();
 			evaled.as_i64().unwrap()
 		};
-		assert_eq!(eval_bv(&state.stack(&ctx.from_u64(1), &ctx.from_u64(0))), 1);
-		assert_eq!(eval_bv(&state.stack(&ctx.from_u64(2), &ctx.from_u64(0))), 1);
-		assert_eq!(eval_bv(&state.stack(&ctx.from_u64(3), &ctx.from_u64(0))), 1);
-		assert_eq!(eval_bv(&state.stack(&ctx.from_u64(3), &ctx.from_u64(1))), 2);
-		assert_eq!(eval_bv(&state.stack(&ctx.from_u64(4), &ctx.from_u64(0))), 3);
+		assert_eq!(
+			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
+			1
+		);
+		assert_eq!(
+			eval_bv(&state.stack(&ctx.from_usize(2), &ctx.from_usize(0))),
+			1
+		);
+		assert_eq!(
+			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(0))),
+			1
+		);
+		assert_eq!(
+			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(1))),
+			2
+		);
+		assert_eq!(
+			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
+			3
+		);
 	}
 
 	#[test]
@@ -539,7 +557,7 @@ mod tests {
 
 		let program = &[Instruction::I32Add];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -555,7 +573,7 @@ mod tests {
 		};
 		let sum = constants.initial_stack[0].bvadd(&constants.initial_stack[1]);
 		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_u64(1), &ctx.from_u64(0))),
+			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
 			eval_bv(&sum)
 		);
 	}
@@ -567,7 +585,7 @@ mod tests {
 
 		let program = &[Instruction::I32Const(1), Instruction::Drop];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		state.assert_transitions();
@@ -577,9 +595,9 @@ mod tests {
 
 		assert_eq!(
 			model
-				.eval(&state.stack_pointer(&ctx.from_u64(2)))
+				.eval(&state.stack_pointer(&ctx.from_usize(2)))
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap(),
 			0
 		);
@@ -597,7 +615,7 @@ mod tests {
 			Instruction::Select,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		state.assert_transitions();
@@ -607,9 +625,9 @@ mod tests {
 
 		assert_eq!(
 			model
-				.eval(&state.stack_pointer(&ctx.from_u64(4)))
+				.eval(&state.stack_pointer(&ctx.from_usize(4)))
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap(),
 			1
 		);
@@ -617,11 +635,11 @@ mod tests {
 			model
 				.eval(
 					&state
-						.stack(&ctx.from_u64(4), &ctx.from_u64(0))
+						.stack(&ctx.from_usize(4), &ctx.from_usize(0))
 						.bv2int(false)
 				)
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap(),
 			1
 		);
@@ -639,7 +657,7 @@ mod tests {
 			Instruction::Select,
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 0);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 0);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		state.assert_transitions();
@@ -649,9 +667,9 @@ mod tests {
 
 		assert_eq!(
 			model
-				.eval(&state.stack_pointer(&ctx.from_u64(4)))
+				.eval(&state.stack_pointer(&ctx.from_usize(4)))
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap(),
 			1
 		);
@@ -659,11 +677,11 @@ mod tests {
 			model
 				.eval(
 					&state
-						.stack(&ctx.from_u64(4), &ctx.from_u64(0))
+						.stack(&ctx.from_usize(4), &ctx.from_usize(0))
 						.bv2int(false)
 				)
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap(),
 			2
 		);
@@ -690,7 +708,7 @@ mod tests {
 			SetLocal(0),
 		];
 
-		let constants = Constants::new(&ctx, &solver, stack_depth(program) as _, 2);
+		let constants = Constants::new(&ctx, &solver, stack_depth(program), 2);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		state.assert_transitions();
@@ -703,35 +721,38 @@ mod tests {
 
 		println!("{}", &model);
 
-		assert_eq!(model.eval(&state.n_locals()).unwrap().as_u64().unwrap(), 3);
+		assert_eq!(
+			model.eval(&state.n_locals()).unwrap().as_usize().unwrap(),
+			3
+		);
 
 		let stack_pointer = |pc| {
 			model
-				.eval(&state.stack_pointer(&ctx.from_u64(pc)))
+				.eval(&state.stack_pointer(&ctx.from_usize(pc)))
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap()
 		};
 		let stack = |pc, i| {
 			model
 				.eval(
 					&state
-						.stack(&ctx.from_u64(pc), &ctx.from_u64(i))
+						.stack(&ctx.from_usize(pc), &ctx.from_usize(i))
 						.bv2int(false),
 				)
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap()
 		};
 		let local = |pc, i| {
 			model
 				.eval(
 					&state
-						.local(&ctx.from_u64(pc), &ctx.from_u64(i))
+						.local(&ctx.from_usize(pc), &ctx.from_usize(i))
 						.bv2int(false),
 				)
 				.unwrap()
-				.as_u64()
+				.as_usize()
 				.unwrap()
 		};
 

@@ -10,10 +10,9 @@ pub use crate::{
 
 use crate::instructions::stack_pop_push_count;
 use parity_wasm::elements::Instruction;
-use std::convert::TryInto;
 use z3::*;
 
-pub fn stack_depth(program: &[Instruction]) -> u64 {
+pub fn stack_depth(program: &[Instruction]) -> usize {
 	let mut stack_pointer: isize = 0;
 	let mut lowest: isize = 0;
 	for i in program {
@@ -22,7 +21,7 @@ pub fn stack_depth(program: &[Instruction]) -> u64 {
 		lowest = std::cmp::min(lowest, stack_pointer - pops);
 		stack_pointer = stack_pointer - pops + pushs;
 	}
-	lowest.abs().try_into().unwrap()
+	lowest.abs() as usize
 }
 
 pub fn in_range<'ctx>(a: &Ast<'ctx>, b: &Ast<'ctx>, c: &Ast<'ctx>) -> Ast<'ctx> {

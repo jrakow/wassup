@@ -212,7 +212,7 @@ pub fn instruction_to_index(i: &Instruction) -> usize {
 		.unwrap_or_else(|| unimplemented!())
 }
 
-pub fn stack_pop_push_count(i: &Instruction) -> (u64, u64) {
+pub fn stack_pop_push_count(i: &Instruction) -> (usize, usize) {
 	use Instruction::*;
 
 	match i {
@@ -267,14 +267,13 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
-		let eval = |ast: &Ast| -> i64 {
+		let eval = |ast: &Ast| -> usize {
 			let ast = model.eval(ast).unwrap();
-			ast.as_i64().unwrap()
+			ast.as_usize().unwrap()
 		};
 
 		for i in iter_instructions() {
 			let (pops, pushs) = stack_pop_push_count(i);
-			let (pops, pushs) = (pops as i64, pushs as i64);
 			assert_eq!(
 				eval(&constants.stack_pop_count(&constants.instruction(i))),
 				pops
