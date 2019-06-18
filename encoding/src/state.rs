@@ -1,7 +1,6 @@
 use crate::instructions::*;
 use crate::*;
 use parity_wasm::elements::Instruction;
-use std::convert::TryInto;
 use z3::*;
 
 pub struct State<'ctx, 'solver, 'constants> {
@@ -62,7 +61,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// set remaining locals to 0
 		let n = self.ctx.named_int_const("n");
-		let bv_zero = self.constants.int2word(&self.ctx.from_u64(0));
+		let bv_zero = self.ctx.from_u64(0).int2bv(32);
 		let n_in_range = in_range(&n_params, &n, &self.n_locals());
 		self.solver.assert(&self.ctx.forall_const(
 			&[&n],
@@ -94,10 +93,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 			// set push_constants function
 			match instr {
-				I32Const(i) => {
-					let i = self
-						.constants
-						.int2word(&self.ctx.from_i64((*i).try_into().unwrap()));
+				I32Const(ref i) => {
+					let i = self.ctx.from_i64(*i as _).int2bv(32);
 					self.solver.assert(&self.push_constants(&pc)._eq(&i));
 				}
 				GetLocal(i) | SetLocal(i) | TeeLocal(i) => {
@@ -302,7 +299,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				&self.ctx.int_sort(), // instruction counter
 				&self.ctx.int_sort(), // stack address
 			],
-			&self.constants.word_sort,
+			&self.ctx.bitvector_sort(32),
 		);
 
 		stack_func.apply(&[pc, index])
@@ -323,7 +320,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			self.ctx
 				.str_sym(&(self.prefix.to_owned() + "push_constants")),
 			&[&self.ctx.int_sort()],
-			&self.constants.word_sort,
+			&self.ctx.bitvector_sort(32),
 		);
 
 		push_constants_func.apply(&[pc])
@@ -333,7 +330,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let local_func = self.ctx.func_decl(
 			self.ctx.str_sym(&(self.prefix.to_owned() + "local")),
 			&[&self.ctx.int_sort(), &self.ctx.int_sort()],
-			&self.constants.word_sort,
+			&self.ctx.bitvector_sort(32),
 		);
 
 		local_func.apply(&[pc, index])

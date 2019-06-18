@@ -4,7 +4,6 @@ use z3::*;
 
 pub struct Constants<'ctx> {
 	pub ctx: &'ctx Context,
-	pub word_sort: Sort<'ctx>,
 	pub instruction_sort: Sort<'ctx>,
 	pub instruction_consts: Vec<FuncDecl<'ctx>>,
 	pub instruction_testers: Vec<FuncDecl<'ctx>>,
@@ -39,7 +38,6 @@ impl<'ctx, 'solver> Constants<'ctx> {
 
 		let constants = Constants {
 			ctx,
-			word_sort,
 			instruction_sort,
 			instruction_consts,
 			instruction_testers,
@@ -95,9 +93,5 @@ impl<'ctx, 'solver> Constants<'ctx> {
 
 			solver.assert(&self.params[i]._eq(&v));
 		}
-	}
-
-	pub fn int2word(&self, i: &Ast<'ctx>) -> Ast<'ctx> {
-		i.int2bv(32)
 	}
 }
