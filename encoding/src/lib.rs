@@ -1,11 +1,13 @@
 mod constants;
 mod instructions;
 mod state;
+mod value_type;
 
 pub use crate::{
 	constants::Constants,
 	instructions::{from_parity_wasm_instructions, stack_depth, Instruction},
 	state::State,
+	value_type::value_type_sort,
 };
 
 use z3::*;
