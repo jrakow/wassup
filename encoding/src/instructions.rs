@@ -3,6 +3,7 @@ use parity_wasm::elements::{
 	Instruction as PInstruction,
 	ValueType::{self, *},
 };
+use z3::*;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, IntoEnumIterator)]
 pub enum Instruction {
@@ -229,6 +230,11 @@ impl Instruction {
 		let (pops, pushs) = self.stack_pops_pushs();
 		(pops.len(), pushs.len())
 	}
+
+	pub fn encode<'ctx>(&self, ctx: &'ctx Context) -> Ast<'ctx> {
+		let (_, consts, _) = instruction_sort(ctx);
+		consts[*self as usize].clone()
+	}
 }
 
 impl From<PInstruction> for Instruction {
@@ -321,6 +327,20 @@ impl From<Instruction> for PInstruction {
 			I32Rotr => PInstruction::I32Rotr,
 		}
 	}
+}
+
+pub fn instruction_sort(ctx: &Context) -> (Sort, Vec<Ast>, Vec<FuncDecl>) {
+	let instruction_names: Vec<_> = Instruction::into_enum_iter()
+		.map(|s| ctx.str_sym(&format!("{:?}", s)))
+		.collect();
+
+	let (sort, consts, testers) = ctx.enumeration_sort(
+		&ctx.str_sym("Instruction"),
+		&instruction_names.iter().collect::<Vec<_>>()[..],
+	);
+
+	let consts = consts.iter().map(|c| c.apply(&[])).collect();
+	(sort, consts, testers)
 }
 
 // TODO this assumes stack cannot underflow
@@ -435,7 +455,6 @@ pub fn stack_depth(program: &[PInstruction]) -> usize {
 mod tests {
 	use super::*;
 	use crate::Constants;
-	use z3::*;
 
 	#[test]
 	fn test_stack_pop_push_count() {
@@ -456,30 +475,24 @@ mod tests {
 
 		for i in Instruction::into_enum_iter() {
 			let (pops, pushs) = i.stack_pop_push_count();
-			assert_eq!(
-				eval(&constants.stack_pop_count(&constants.instruction(&i))),
-				pops
-			);
-			assert_eq!(
-				eval(&constants.stack_push_count(&constants.instruction(&i))),
-				pushs
-			);
+			assert_eq!(eval(&constants.stack_pop_count(&i.encode(&ctx))), pops);
+			assert_eq!(eval(&constants.stack_push_count(&i.encode(&ctx))), pushs);
 		}
 
 		assert_eq!(
-			eval(&constants.stack_pop_count(&constants.instruction(&Instruction::I32Add))),
+			eval(&constants.stack_pop_count(&Instruction::I32Add.encode(&ctx))),
 			2
 		);
 		assert_eq!(
-			eval(&constants.stack_push_count(&constants.instruction(&Instruction::I32Add))),
+			eval(&constants.stack_push_count(&Instruction::I32Add.encode(&ctx))),
 			1
 		);
 		assert_eq!(
-			eval(&constants.stack_pop_count(&constants.instruction(&Instruction::I32Const))),
+			eval(&constants.stack_pop_count(&Instruction::I32Const.encode(&ctx))),
 			0
 		);
 		assert_eq!(
-			eval(&constants.stack_push_count(&constants.instruction(&Instruction::I32Const))),
+			eval(&constants.stack_push_count(&Instruction::I32Const.encode(&ctx))),
 			1
 		);
 	}

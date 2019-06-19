@@ -5,7 +5,7 @@ mod value_type;
 
 pub use crate::{
 	constants::Constants,
-	instructions::{from_parity_wasm_instructions, stack_depth, Instruction},
+	instructions::{from_parity_wasm_instructions, instruction_sort, stack_depth, Instruction},
 	state::State,
 	value_type::value_type_sort,
 };

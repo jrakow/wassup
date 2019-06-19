@@ -1,4 +1,4 @@
-use crate::instructions::from_parity_wasm_instructions;
+use crate::instructions::{from_parity_wasm_instructions, instruction_sort};
 use crate::*;
 use parity_wasm::elements::{Instruction as PInstruction, ValueType};
 use z3::*;
@@ -87,7 +87,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// set program_func to program
 		for (pc, instruction) in program.iter().enumerate() {
-			let instruction = self.constants.instruction(instruction);
+			let instruction = instruction.encode(self.ctx);
 			self.solver
 				.assert(&self.program(&self.ctx.from_usize(pc))._eq(&instruction))
 		}
@@ -167,7 +167,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let instr = self.program(&pc);
 
 		let transition_instruction = |i: &Instruction, ast: &Ast<'ctx>| -> Ast<'ctx> {
-			self.constants.instruction(i)._eq(&instr).implies(ast)
+			i.encode(self.ctx)._eq(&instr).implies(ast)
 		};
 
 		// ad-hoc conversions
@@ -265,10 +265,11 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let i = self.ctx.named_int_const("i");
 		let i_in_range = in_range(&self.ctx.from_usize(0), &i, &self.n_locals());
 
-		let is_setlocal = self.constants.instruction_testers[Instruction::I32SetLocal as usize]
-			.apply(&[&self.program(&pc)]);
-		let is_teelocal = self.constants.instruction_testers[Instruction::I32TeeLocal as usize]
-			.apply(&[&self.program(&pc)]);
+		let instruction_testers = instruction_sort(self.ctx).2;
+		let is_setlocal =
+			instruction_testers[Instruction::I32SetLocal as usize].apply(&[&self.program(&pc)]);
+		let is_teelocal =
+			instruction_testers[Instruction::I32TeeLocal as usize].apply(&[&self.program(&pc)]);
 		let is_setting_instruction = is_setlocal.or(&[&is_teelocal]);
 		let index_active = i._eq(&self.local_index(&pc));
 		let enable = is_setting_instruction.and(&[&index_active]).not();
@@ -325,7 +326,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let program_func = self.ctx.func_decl(
 			self.ctx.str_sym(&(self.prefix.to_owned() + "program")),
 			&[&self.ctx.int_sort()],
-			&self.constants.instruction_sort,
+			&instruction_sort(&self.ctx).0,
 		);
 
 		program_func.apply(&[pc])
@@ -403,7 +404,7 @@ mod tests {
 
 		for (i, instr) in program.iter().enumerate() {
 			let instr_enc = state.program(&ctx.from_usize(i));
-			let is_equal = constants.instruction_testers[*instr as usize].apply(&[&instr_enc]);
+			let is_equal = instruction_sort(&ctx).2[*instr as usize].apply(&[&instr_enc]);
 			let b = model.eval(&is_equal).unwrap().as_bool().unwrap();
 			assert!(b);
 		}

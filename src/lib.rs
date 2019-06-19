@@ -128,7 +128,7 @@ pub fn superoptimize_impl(
 			let encoded_instr = model.eval(&target_state.program(&ctx.from_i64(i))).unwrap();
 
 			for instr in Instruction::into_enum_iter() {
-				let equal_tester = &constants.instruction_testers[instr as usize];
+				let equal_tester = &instruction_sort(&ctx).2[instr as usize];
 				let equal = model
 					.eval(&equal_tester.apply(&[&encoded_instr]))
 					.unwrap()
