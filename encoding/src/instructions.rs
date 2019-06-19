@@ -6,6 +6,12 @@ use parity_wasm::elements::{
 use z3::*;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, IntoEnumIterator)]
+/// Directly encodable Wasm instruction.
+///
+/// There a few noteworthy differences to parity-wasm's instructions:
+/// - `I32Drop`/`I32Select` are typed, not parametric like `Drop`
+/// - Not all instructions are implemented
+/// - Instructions have no arguments. Arguments are encoded separately.
 pub enum Instruction {
 	// Unreachable,
 	Nop,
@@ -198,6 +204,7 @@ pub enum Instruction {
 }
 
 impl Instruction {
+	/// Parameters and returns of the instruction
 	pub fn stack_pops_pushs(&self) -> (&'static [ValueType], &'static [ValueType]) {
 		use Instruction::*;
 
@@ -231,6 +238,7 @@ impl Instruction {
 		(pops.len(), pushs.len())
 	}
 
+	/// Encode the instruction in the `Context` ctx and return the encoded instruction.
 	pub fn encode<'ctx>(&self, ctx: &'ctx Context) -> Ast<'ctx> {
 		let (_, consts, _) = instruction_sort(ctx);
 		consts[*self as usize].clone()
@@ -238,7 +246,9 @@ impl Instruction {
 }
 
 impl From<PInstruction> for Instruction {
-	// only to be called with non-parametric instructions
+	/// Convert from parity-wasm's instruction
+	///
+	/// If called with an instruction with an argument, it panics, as there would be information loss.
 	fn from(pi: PInstruction) -> Self {
 		use PInstruction::*;
 
@@ -285,7 +295,9 @@ impl From<PInstruction> for Instruction {
 }
 
 impl From<Instruction> for PInstruction {
-	// only to be called with non-parametric instructions
+	/// Convert to parity-wasm's instruction
+	///
+	/// Panics if a variant with an argument is to be constructed, as arguments are not encoded.
 	fn from(i: Instruction) -> Self {
 		use Instruction::*;
 
@@ -329,6 +341,10 @@ impl From<Instruction> for PInstruction {
 	}
 }
 
+/// Datatype for instructions in Z3
+///
+/// Returns the `Sort`, a constant and a tester for each instruction.
+/// Instructions are encoded according to their enum discriminant.
 pub fn instruction_sort(ctx: &Context) -> (Sort, Vec<Ast>, Vec<FuncDecl>) {
 	let instruction_names: Vec<_> = Instruction::into_enum_iter()
 		.map(|s| ctx.str_sym(&format!("{:?}", s)))
@@ -343,7 +359,9 @@ pub fn instruction_sort(ctx: &Context) -> (Sort, Vec<Ast>, Vec<FuncDecl>) {
 	(sort, consts, testers)
 }
 
-// TODO this assumes stack cannot underflow
+/// Convert a sequence of instructions with additional type annotations to encodable instructions.
+///
+/// This converts to the local `Instruction` type, where `Drop` and such are typed as `I32Drop`. Same for locals.
 pub fn from_parity_wasm_instructions(
 	source: &[PInstruction],
 	local_types: &[ValueType],
@@ -406,6 +424,7 @@ pub fn from_parity_wasm_instructions(
 	target
 }
 
+/// Number of parameters/returns of the instruction
 pub fn stack_pop_push_count(i: &PInstruction) -> (usize, usize) {
 	use PInstruction::*;
 
@@ -439,6 +458,7 @@ pub fn stack_pop_push_count(i: &PInstruction) -> (usize, usize) {
 	}
 }
 
+/// How many words this instructions sequence assumes to be on the stack, when it starts executing.
 pub fn stack_depth(program: &[PInstruction]) -> usize {
 	let mut stack_pointer: isize = 0;
 	let mut lowest: isize = 0;

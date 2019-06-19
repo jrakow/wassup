@@ -12,11 +12,14 @@ pub use crate::{
 
 use z3::*;
 
+/// a <= b < c
 pub fn in_range<'ctx>(a: &Ast<'ctx>, b: &Ast<'ctx>, c: &Ast<'ctx>) -> Ast<'ctx> {
 	a.le(&b).and(&[&b.lt(&c)])
 }
 
-// this cannot be tested directly as Z3 does not support evaluating terms with quantifiers
+/// Whether state `lhs` at `lhs_pc` is equivalent to state `rhs` at `rhs_pc`
+///
+/// This expression contains quantifiers and cannot be tested directly as Z3 does not support evaluating terms with quantifiers.
 pub fn equivalent<'ctx>(
 	lhs: &State<'ctx, '_, '_>,
 	lhs_pc: &Ast<'ctx>,

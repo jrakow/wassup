@@ -3,10 +3,14 @@ use enum_iterator::IntoEnumIterator;
 use parity_wasm::elements::ValueType;
 use z3::*;
 
+/// Encoded types and expressions that are independent of a specific instruction sequence.
 pub struct Constants<'ctx> {
 	pub ctx: &'ctx Context,
+	/// Uninterpreted initial stack values
 	pub initial_stack: Vec<Ast<'ctx>>,
+	/// Type of the initial stack
 	pub initial_stack_types: Vec<ValueType>,
+	/// Arguments == Values of the first locals
 	pub params: Vec<Ast<'ctx>>,
 }
 
@@ -49,6 +53,9 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		constants
 	}
 
+	/// How many values the instruction takes from the stack.
+	///
+	/// This is here so it can be encoded as a function, not as a big expression.
 	pub fn stack_pop_count(&self, instr: &Ast<'ctx>) -> Ast<'ctx> {
 		let stack_pop_count_func = self.ctx.func_decl(
 			self.ctx.str_sym("stack_pop_count"),
@@ -59,6 +66,9 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		stack_pop_count_func.apply(&[instr])
 	}
 
+	/// How many values the instruction pushes on the stack.
+	///
+	/// This is here so it can be encoded as a function, not as a big expression.
 	pub fn stack_push_count(&self, instr: &Ast<'ctx>) -> Ast<'ctx> {
 		let stack_push_count_func = self.ctx.func_decl(
 			self.ctx.str_sym("stack_push_count"),
@@ -69,6 +79,9 @@ impl<'ctx, 'solver> Constants<'ctx> {
 		stack_push_count_func.apply(&[instr])
 	}
 
+	/// Set the function arguments
+	///
+	/// This is useful for evaluating operations on arguments, compared to doing operations for all possible arguments.
 	pub fn set_params(&self, solver: &Solver, params: &[u32]) {
 		for (i, v) in params.iter().enumerate() {
 			let v = self.ctx.from_u32(*v).int2bv(32);
