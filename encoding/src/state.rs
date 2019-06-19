@@ -308,6 +308,19 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		stack_func.apply(&[pc, index])
 	}
 
+	pub fn stack_type(&self, pc: &Ast<'ctx>, index: &Ast<'ctx>) -> Ast<'ctx> {
+		let stack_type_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "stack_type")),
+			&[
+				&self.ctx.int_sort(), // instruction counter
+				&self.ctx.int_sort(), // stack address
+			],
+			&value_type_sort(self.ctx).0,
+		);
+
+		stack_type_func.apply(&[pc, index])
+	}
+
 	pub fn program(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		let program_func = self.ctx.func_decl(
 			self.ctx.str_sym(&(self.prefix.to_owned() + "program")),
