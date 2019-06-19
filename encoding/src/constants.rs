@@ -1,5 +1,4 @@
 use crate::instructions::*;
-use enum_iterator::IntoEnumIterator;
 use parity_wasm::elements::ValueType;
 use z3::*;
 
@@ -36,7 +35,7 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			params,
 		};
 
-		for ref i in Instruction::into_enum_iter() {
+		for ref i in Instruction::iter_templates() {
 			let (pops, pushs) = i.stack_pop_push_count();
 			solver.assert(
 				&constants

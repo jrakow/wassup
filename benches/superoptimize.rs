@@ -1,19 +1,13 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use parity_wasm::elements::Instruction::*;
-use parity_wasm::elements::ValueType;
-use wassup::superoptimize_impl;
+use wassup::superoptimize_snippet;
+use wassup_encoding::Instruction::*;
 
 fn const0_add(c: &mut Criterion) {
 	c.bench_function("const0_add", |b| {
 		b.iter(|| {
-			let source = &[I32Const(0), I32Add];
+			let source = &[I32Const(0), I32Add][..];
 
-			superoptimize_impl(
-				black_box(source),
-				black_box(0),
-				black_box(&[]),
-				black_box(&[ValueType::I32]),
-			)
+			superoptimize_snippet(black_box(source), black_box(0))
 		})
 	});
 }
@@ -21,14 +15,9 @@ fn const0_add(c: &mut Criterion) {
 fn consts_add(c: &mut Criterion) {
 	c.bench_function("consts_add", |b| {
 		b.iter(|| {
-			let source = &[I32Const(1), I32Const(2), I32Add];
+			let source = &[I32Const(1), I32Const(2), I32Add][..];
 
-			superoptimize_impl(
-				black_box(source),
-				black_box(0),
-				black_box(&[]),
-				black_box(&[]),
-			)
+			superoptimize_snippet(black_box(source), black_box(0))
 		})
 	});
 }
@@ -36,14 +25,9 @@ fn consts_add(c: &mut Criterion) {
 fn const_nop(c: &mut Criterion) {
 	c.bench_function("const_nop", |b| {
 		b.iter(|| {
-			let source = &[I32Const(1), Nop];
+			let source = &[I32Const(1), Nop][..];
 
-			superoptimize_impl(
-				black_box(source),
-				black_box(0),
-				black_box(&[]),
-				black_box(&[]),
-			)
+			superoptimize_snippet(black_box(source), black_box(0))
 		})
 	});
 }

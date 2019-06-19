@@ -11,11 +11,11 @@ authors = ["Julius Rakow <julius@rakow.me>"]
 edition = "2018"
 
 [dependencies]
-enum-iterator = "0.3.0"
+either = "1.5.2"
 parity-wasm = "0.38.0"
-z3 = { path = "../z3.rs/z3" }
 rayon = "1.0.3"
 wassup-encoding = { path = "encoding" }
+z3 = { path = "../z3.rs/z3" }
 
 [dev-dependencies]
 criterion = "0.2.11"

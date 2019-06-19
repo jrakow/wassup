@@ -1,11 +1,13 @@
 mod constants;
+mod function;
 mod instructions;
 mod state;
 mod value_type;
 
 pub use crate::{
 	constants::Constants,
-	instructions::{from_parity_wasm_instructions, instruction_sort, stack_depth, Instruction},
+	function::Function,
+	instructions::{stack_depth, Instruction},
 	state::State,
 	value_type::value_type_sort,
 };
@@ -45,28 +47,31 @@ pub fn equivalent<'ctx>(
 		.and(&[&stack_pointers_equal, &stacks_equal])
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+	I32(i32),
+	I64(i64),
+	F32(f32),
+	F64(f64),
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use parity_wasm::elements::Instruction as PInstruction;
+	use Instruction::*;
 
 	#[test]
 	fn stack_depth_test() {
 		let program = &[];
 		assert_eq!(stack_depth(program), 0);
 
-		let program = &[PInstruction::I32Add];
+		let program = &[I32Add];
 		assert_eq!(stack_depth(program), 2);
 
-		let program = &[PInstruction::I32Const(1), PInstruction::I32Add];
+		let program = &[I32Const(1), I32Add];
 		assert_eq!(stack_depth(program), 1);
 
-		let program = &[
-			PInstruction::I32Const(1),
-			PInstruction::I32Const(1),
-			PInstruction::I32Const(1),
-			PInstruction::I32Add,
-		];
+		let program = &[I32Const(1), I32Const(1), I32Const(1), I32Add];
 		assert_eq!(stack_depth(program), 0);
 	}
 }

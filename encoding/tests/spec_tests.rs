@@ -59,6 +59,7 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 				Type::Function(f) => f.params(),
 			};
 			let body = &module.code_section().unwrap().bodies()[func_index];
+			let function = Function::from_wasm_func_body_params(body, params);
 
 			let instr = body.code().elements();
 			// slice of last End
@@ -72,7 +73,7 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 			// set initial values
 			let args: Vec<_> = args.iter().cloned().map(value_cast).collect();;
 			constants.set_params(&solver, &args);
-			state.set_source_program(instr, params);
+			state.set_source_program(&function.instructions[0].as_ref().left().unwrap());
 			state.assert_transitions();
 
 			assert!(solver.check());
