@@ -67,7 +67,7 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 
 			let ctx = Context::new(&Config::default());
 			let solver = Solver::new(&ctx);
-			let constants = Constants::new(&ctx, &solver, params.len(), params);
+			let constants = Constants::new(&ctx, params.len(), params);
 			let state = State::new(&ctx, &solver, &constants, "");
 
 			// set initial values

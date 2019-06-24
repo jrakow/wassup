@@ -13,13 +13,8 @@ pub struct Constants<'ctx> {
 	pub params: Vec<Ast<'ctx>>,
 }
 
-impl<'ctx, 'solver> Constants<'ctx> {
-	pub fn new(
-		ctx: &'ctx Context,
-		solver: &Solver<'ctx>,
-		n_params: usize,
-		initial_stack_types: &[ValueType],
-	) -> Self {
+impl<'ctx> Constants<'ctx> {
+	pub fn new(ctx: &'ctx Context, n_params: usize, initial_stack_types: &[ValueType]) -> Self {
 		let word_sort = ctx.bitvector_sort(32);
 		let initial_stack: Vec<_> = (0..initial_stack_types.len())
 			.map(|_| ctx.fresh_const("initial_stack", &word_sort))
@@ -28,54 +23,49 @@ impl<'ctx, 'solver> Constants<'ctx> {
 			.map(|_| ctx.fresh_const("param", &word_sort))
 			.collect();
 
-		let constants = Constants {
+		Self {
 			ctx,
 			initial_stack,
 			initial_stack_types: initial_stack_types.to_vec(),
 			params,
-		};
-
-		for ref i in Instruction::iter_templates() {
-			let (pops, pushs) = i.stack_pop_push_count();
-			solver.assert(
-				&constants
-					.stack_pop_count(&i.encode(ctx))
-					._eq(&ctx.from_usize(pops)),
-			);
-			solver.assert(
-				&constants
-					.stack_push_count(&i.encode(ctx))
-					._eq(&ctx.from_usize(pushs)),
-			);
 		}
-
-		constants
 	}
 
 	/// How many values the instruction takes from the stack.
 	///
 	/// This is here so it can be encoded as a function, not as a big expression.
 	pub fn stack_pop_count(&self, instr: &Ast<'ctx>) -> Ast<'ctx> {
-		let stack_pop_count_func = self.ctx.func_decl(
-			self.ctx.str_sym("stack_pop_count"),
-			&[&instruction_sort(self.ctx).0],
-			&self.ctx.int_sort(),
-		);
+		let instruction_datatype = instruction_datatype(self.ctx);
+		// build a switch statement from if-then-else
+		let mut pop_switch = self.ctx.from_usize(0);
+		for i in Instruction::iter_templates() {
+			let (pops, _) = i.stack_pop_push_count();
 
-		stack_pop_count_func.apply(&[instr])
+			let variant = &instruction_datatype.variants[i.as_usize()];
+			let active = variant.tester.apply(&[&instr]);
+
+			pop_switch = active.ite(&self.ctx.from_usize(pops), &pop_switch);
+		}
+		pop_switch
 	}
 
 	/// How many values the instruction pushes on the stack.
 	///
 	/// This is here so it can be encoded as a function, not as a big expression.
 	pub fn stack_push_count(&self, instr: &Ast<'ctx>) -> Ast<'ctx> {
-		let stack_push_count_func = self.ctx.func_decl(
-			self.ctx.str_sym("stack_push_count"),
-			&[&instruction_sort(self.ctx).0],
-			&self.ctx.int_sort(),
-		);
+		let instruction_datatype = instruction_datatype(self.ctx);
 
-		stack_push_count_func.apply(&[instr])
+		// build a switch statement from if-then-else
+		let mut push_switch = self.ctx.from_usize(0);
+		for i in Instruction::iter_templates() {
+			let (_, pushs) = i.stack_pop_push_count();
+
+			let variant = &instruction_datatype.variants[i.as_usize()];
+			let active = variant.tester.apply(&[&instr]);
+
+			push_switch = active.ite(&self.ctx.from_usize(pushs), &push_switch);
+		}
+		push_switch
 	}
 
 	/// Set the function arguments

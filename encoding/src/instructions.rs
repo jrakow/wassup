@@ -324,7 +324,16 @@ impl Instruction {
 	}
 
 	pub fn encode<'ctx>(&self, ctx: &'ctx Context) -> Ast<'ctx> {
-		instruction_sort(ctx).1[self.as_usize()].clone()
+		use Instruction::*;
+
+		let constructor = &instruction_datatype(ctx).variants[self.as_usize()].constructor;
+		match self {
+			I32Const(i) => constructor.apply(&[&ctx.from_i32(*i).int2bv(32)]),
+			I32GetLocal(i) | I32SetLocal(i) | I32TeeLocal(i) => {
+				constructor.apply(&[&ctx.from_u32(*i)])
+			}
+			_ => constructor.apply(&[]),
+		}
 	}
 }
 
@@ -377,60 +386,31 @@ impl From<Instruction> for PInstruction {
 
 /// Datatype for instructions in Z3
 ///
-/// Returns the `Sort`, a constant and a tester for each instruction.
-/// Instructions are encoded according to their enum discriminant.
-pub fn instruction_sort(ctx: &Context) -> (Sort, Vec<Ast>, Vec<FuncDecl>) {
-	let instruction_names: Vec<_> = Instruction::iter_templates()
-		.map(|s| match s {
-			Instruction::I32Const(_) => ctx.str_sym("I32Const"),
-			Instruction::I32GetLocal(_) => ctx.str_sym("I32GetLocal"),
-			Instruction::I32SetLocal(_) => ctx.str_sym("I32SetLocal"),
-			Instruction::I32TeeLocal(_) => ctx.str_sym("I32TeeLocal"),
-			x => ctx.str_sym(&format!("{:?}", x)),
-		})
-		.collect();
+/// Instructions are indexed according to their enum discriminant.
+pub fn instruction_datatype(ctx: &Context) -> Datatype {
+	let mut datatype = DatatypeBuilder::new(ctx);
 
-	let (sort, consts, testers) = ctx.enumeration_sort(
-		&ctx.str_sym("Instruction"),
-		&instruction_names.iter().collect::<Vec<_>>()[..],
-	);
-
-	let consts = consts.iter().map(|c| c.apply(&[])).collect();
-	(sort, consts, testers)
-}
-
-/// Number of parameters/returns of the instruction
-pub fn stack_pop_push_count(i: &PInstruction) -> (usize, usize) {
-	use PInstruction::*;
-
-	match i {
-		Nop => (0, 0),
-
-		I32Const(_) => (0, 1),
-
-		// itestop
-		I32Eqz => (1, 1),
-		// irelop
-		I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU => {
-			(2, 1)
+	let bv_32 = ctx.bitvector_sort(32);
+	for i in Instruction::iter_templates() {
+		datatype = match i {
+			Instruction::I32Const(_) => datatype.variant("I32Const", &[("value", &bv_32)]),
+			Instruction::I32GetLocal(_) => {
+				datatype.variant("I32GetLocal", &[("get_local_index", &ctx.int_sort())])
+			}
+			Instruction::I32SetLocal(_) => {
+				datatype.variant("I32SetLocal", &[("set_local_index", &ctx.int_sort())])
+			}
+			Instruction::I32TeeLocal(_) => {
+				datatype.variant("I32TeeLocal", &[("tee_local_index", &ctx.int_sort())])
+			}
+			x => {
+				let name = format!("{:?}", x);
+				datatype.variant(&name, &[])
+			}
 		}
-		// iunop
-		I32Clz | I32Ctz | I32Popcnt => (1, 1),
-		// ibinop
-		I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
-		| I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => (2, 1),
-
-		// parametric
-		Drop => (1, 0),
-		Select => (3, 1),
-
-		// locals
-		GetLocal(_) => (0, 1),
-		SetLocal(_) => (1, 0),
-		TeeLocal(_) => (0, 0),
-
-		_ => unimplemented!(),
 	}
+
+	datatype.finish("Instruction")
 }
 
 /// How many words this instructions sequence assumes to be on the stack, when it starts executing.
@@ -458,7 +438,7 @@ mod tests {
 			Context::new(&cfg)
 		};
 		let solver = Solver::new(&ctx);
-		let constants = Constants::new(&ctx, &solver, 0, &[]);
+		let constants = Constants::new(&ctx, 0, &[]);
 
 		assert!(solver.check());
 		let model = solver.get_model();

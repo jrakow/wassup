@@ -55,7 +55,7 @@ pub fn superoptimize_snippet(source_program: &[Instruction], n_params: usize) ->
 
 	// TODO compute actual stack types
 	let initial_stack = vec![ValueType::I32; stack_depth(&source_program[..])];
-	let constants = Constants::new(&ctx, &solver, n_params, &initial_stack);
+	let constants = Constants::new(&ctx, n_params, &initial_stack);
 	let source_state = State::new(&ctx, &solver, &constants, "source_");
 	let target_state = State::new(&ctx, &solver, &constants, "target_");
 	source_state.set_source_program(&source_program[..]);
