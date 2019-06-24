@@ -748,12 +748,8 @@ mod tests {
 		state.assert_transitions();
 		constants.set_params(&solver, &[1, 2]);
 
-		println!("{}", &solver);
-
 		assert!(solver.check());
 		let model = solver.get_model();
-
-		println!("{}", &model);
 
 		assert_eq!(
 			model.eval(&state.n_locals()).unwrap().as_usize().unwrap(),
