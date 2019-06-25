@@ -55,12 +55,20 @@ pub fn equivalent<'ctx>(
 		ctx.forall_const(&[&n], &n_in_range.implies(&condition))
 	};
 
-	ctx.from_bool(true).and(&[
+	let left_trapped = lhs.trapped(lhs_pc);
+	let right_trapped = rhs.trapped(rhs_pc);
+	let both_trapped = left_trapped.and(&[&right_trapped]);
+	let trapped_equal = left_trapped._eq(&right_trapped);
+
+	let states_equal = ctx.from_bool(true).and(&[
 		&stack_pointers_equal,
 		&stacks_equal,
 		&n_locals_equal,
 		&locals_equal,
-	])
+		&trapped_equal,
+	]);
+
+	both_trapped.or(&[&states_equal])
 }
 
 #[derive(Clone, Debug, PartialEq)]

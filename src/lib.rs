@@ -143,4 +143,11 @@ mod tests {
 		let target = superoptimize_snippet(source_program, &[]);
 		assert_eq!(target, source_program);
 	}
+
+	#[test]
+	fn superoptimize_unreachable_garbage() {
+		let source_program = &[Unreachable, I32GetLocal(0)];
+		let target = superoptimize_snippet(source_program, &[ValueType::I32]);
+		assert_eq!(target, vec![Unreachable]);
+	}
 }

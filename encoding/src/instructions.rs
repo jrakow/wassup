@@ -11,7 +11,7 @@ use z3::*;
 /// - `I32Drop`/`I32Select` are typed, not parametric like `Drop`
 /// - Not all instructions are implemented
 pub enum Instruction {
-	// Unreachable,
+	Unreachable,
 	Nop,
 	// Block(BlockType),
 	// Loop(BlockType),
@@ -201,6 +201,7 @@ impl Instruction {
 		use Instruction::*;
 
 		match self {
+			Unreachable => (&[], &[]),
 			Nop => (&[], &[]),
 
 			I32Const(_) => (&[], &[I32]),
@@ -234,6 +235,7 @@ impl Instruction {
 		use PInstruction::*;
 
 		match pi {
+			Unreachable => Some(Instruction::Unreachable),
 			Nop => Some(Instruction::Nop),
 
 			I32Const(i) => Some(Instruction::I32Const(*i)),
@@ -273,6 +275,7 @@ impl Instruction {
 	pub fn iter_templates() -> impl Iterator<Item = Instruction> {
 		use Instruction::*;
 		[
+			Unreachable,
 			Nop,
 			I32Drop,
 			I32Select,
@@ -343,6 +346,7 @@ impl From<Instruction> for PInstruction {
 		use Instruction::*;
 
 		match i {
+			Unreachable => PInstruction::Unreachable,
 			Nop => PInstruction::Nop,
 
 			I32Drop => PInstruction::Drop,

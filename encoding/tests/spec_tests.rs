@@ -97,6 +97,7 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 				.unwrap() as u32;
 			i
 		}
+		// TODO trapped tests
 		_ => panic!(),
 	}
 }

@@ -29,6 +29,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	pub fn set_initial(&self) {
+		// set trapped(0) = false
+		self.solver
+			.assert(&self.trapped(&self.ctx.from_usize(0)).not());
+
 		// set stack(0, i) == initial_stack[i]
 		for (i, var) in self.constants.initial_stack.iter().enumerate() {
 			self.solver.assert(
@@ -173,6 +177,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&self.preserve_locals(&pc),
 			&self.transition_stack_pointer(&pc),
 			&self.transition_stack(&pc),
+			&self.transition_trapped(&pc),
 		])
 	}
 
@@ -223,7 +228,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let active = variant.tester.apply(&[&instr]);
 
 			let transition = match Instruction::iter_templates().nth(i).unwrap() {
-				Nop | I32Drop => self.ctx.from_bool(true),
+				Unreachable | Nop | I32Drop => self.ctx.from_bool(true),
 
 				I32Const(_) => result._eq(&variant.accessors[0].apply(&[&instr])),
 
@@ -342,6 +347,42 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		)
 	}
 
+	fn transition_trapped(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
+		use Instruction::*;
+
+		let instr = self.program(&pc);
+		let pc_next = pc.add(&[&self.ctx.from_usize(1)]);
+
+		let bv_zero = self.ctx.from_usize(0).int2bv(32);
+
+		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
+		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
+
+		let mut conditions = Vec::new();
+		conditions.push(self.trapped(&pc));
+
+		for (i, variant) in instruction_datatype(self.ctx).variants.iter().enumerate() {
+			let active = variant.tester.apply(&[&instr]);
+
+			let condition = match Instruction::iter_templates().nth(i).unwrap() {
+				Unreachable => self.ctx.from_bool(true),
+
+				I32DivU | I32RemU | I32RemS => op2._eq(&bv_zero),
+				I32DivS => {
+					let divide_by_zero = op2._eq(&bv_zero);
+					let overflow = op2.bvsdiv_no_overflow(&op1);
+					divide_by_zero.or(&[&overflow])
+				}
+				_ => continue,
+			};
+			conditions.push(active.and(&[&condition]));
+		}
+
+		let conditions: Vec<&Ast> = conditions.iter().collect();
+		let any_condition = self.ctx.from_bool(false).or(&conditions);
+		any_condition._eq(&self.trapped(&pc_next))
+	}
+
 	// stack_pointer - 1 is top of stack
 	pub fn stack_pointer(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		let stack_pointer_func = self.ctx.func_decl(
@@ -398,6 +439,16 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		);
 
 		local_func.apply(&[pc, index])
+	}
+
+	pub fn trapped(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
+		let trapped_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "trapped")),
+			&[&self.ctx.int_sort()],
+			&self.ctx.bool_sort(),
+		);
+
+		trapped_func.apply(&[pc])
 	}
 
 	pub fn program_length(&self) -> Ast<'ctx> {
@@ -808,5 +859,64 @@ mod tests {
 		assert_eq!(stack(8, 0), 2);
 		assert_eq!(local(8, 0), 2);
 		assert_eq!(local(8, 1), 1);
+	}
+
+	#[test]
+	fn transition_trapped_unreachable() {
+		let ctx = Context::new(&Config::default());
+		let solver = Solver::new(&ctx);
+
+		let program = &[Unreachable, Nop];
+
+		let constants = Constants::new(&ctx, vec![], &[]);
+		let state = State::new(&ctx, &solver, &constants, "");
+		state.set_source_program(program);
+
+		solver.assert(&state.transitions());
+
+		assert!(solver.check());
+		let model = solver.get_model();
+
+		let trapped = |i| {
+			model
+				.eval(&state.trapped(&ctx.from_usize(i)))
+				.unwrap()
+				.as_bool()
+				.unwrap()
+		};
+
+		assert!(!trapped(0));
+		assert!(trapped(1));
+		assert!(trapped(2));
+	}
+
+	#[test]
+	fn transition_trapped_div0() {
+		let ctx = Context::new(&Config::default());
+		let solver = Solver::new(&ctx);
+
+		let program = &[I32Const(0), I32Const(1), I32DivU];
+
+		let constants = Constants::new(&ctx, vec![], &[]);
+		let state = State::new(&ctx, &solver, &constants, "");
+		state.set_source_program(program);
+
+		solver.assert(&state.transitions());
+
+		assert!(solver.check());
+		let model = solver.get_model();
+
+		let trapped = |i| {
+			model
+				.eval(&state.trapped(&ctx.from_usize(i)))
+				.unwrap()
+				.as_bool()
+				.unwrap()
+		};
+
+		assert!(!trapped(0));
+		assert!(!trapped(1));
+		assert!(!trapped(2));
+		assert!(trapped(3));
 	}
 }
