@@ -221,7 +221,7 @@ impl Instruction {
 			// locals
 			I32GetLocal(_) => (&[], &[I32]),
 			I32SetLocal(_) => (&[I32], &[]),
-			I32TeeLocal(_) => (&[], &[]),
+			I32TeeLocal(_) => (&[I32], &[I32]),
 		}
 	}
 

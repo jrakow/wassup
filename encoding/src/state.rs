@@ -225,6 +225,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let mod_n = |b: &Ast<'ctx>, n: usize| b.bvurem(&self.ctx.from_usize(n).int2bv(32));
 
 		// constants
+		let zero = self.ctx.from_usize(0);
 		let bv_zero = self.ctx.from_usize(0).int2bv(32);
 		let pc_next = &pc.add(&[&self.ctx.from_usize(1)]);
 
@@ -278,11 +279,26 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				// SetLocal and TeeLocal differ in pop count
 				I32GetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
-					result._eq(&self.local(&pc, &index))
+					let index_in_range = in_range(&zero, &index, &self.n_locals());
+					result._eq(&self.local(&pc, &index)).and(&[&index_in_range])
 				}
-				I32SetLocal(_) | I32TeeLocal(_) => {
+				I32SetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
-					self.local(&pc_next, &index)._eq(&op1)
+					let index_in_range = in_range(&zero, &index, &self.n_locals());
+					self.local(&pc_next, &index)
+						._eq(&op1)
+						.and(&[&index_in_range])
+				}
+				I32TeeLocal(_) => {
+					let index = variant.accessors[0].apply(&[&instr]);
+
+					let index_in_range = in_range(&zero, &index, &self.n_locals());
+					let local_set = self.local(&pc_next, &index)._eq(&op1);
+					let stack_set = result._eq(&op1);
+
+					self.ctx
+						.from_bool(true)
+						.and(&[&index_in_range, &local_set, &stack_set])
 				}
 			};
 			transitions.push(active.implies(&transition));
@@ -730,7 +746,7 @@ mod tests {
 			I32GetLocal(1),
 			I32GetLocal(0),
 			I32SetLocal(1),
-			I32SetLocal(0),
+			I32TeeLocal(0),
 		];
 
 		let constants = Constants::new(&ctx, 2, &[]);
@@ -802,7 +818,8 @@ mod tests {
 		assert_eq!(stack_pointer(4), 0);
 		assert_eq!(local(4, 2), 3);
 
-		assert_eq!(stack_pointer(8), 0);
+		assert_eq!(stack_pointer(8), 1);
+		assert_eq!(stack(8, 0), 2);
 		assert_eq!(local(8, 0), 2);
 		assert_eq!(local(8, 1), 1);
 	}
