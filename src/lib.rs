@@ -63,14 +63,6 @@ pub fn superoptimize_snippet(source_program: &[Instruction], n_params: usize) ->
 	source_state.assert_transitions();
 	target_state.assert_transitions();
 
-	// start equivalent
-	solver.assert(&equivalent(
-		&source_state,
-		&ctx.from_u64(0),
-		&target_state,
-		&ctx.from_u64(0),
-	));
-
 	let target_length = &target_state.program_length();
 
 	let mut current_best = source_program.to_vec();
