@@ -1,10 +1,11 @@
 use crate::instructions::Instruction;
+use crate::Value;
 use either::Either;
 use parity_wasm::elements::{
 	FuncBody, Instruction as PInstruction, Instructions, Local, ValueType,
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 /// Equivalent of a Wasm function definition
 pub struct Function {
 	/// Types of the parameters and locals
@@ -43,60 +44,52 @@ impl Function {
 
 		let mut instructions = Vec::new();
 		for wasm_instruction in wasm_instructions.iter() {
-			// Monomorphize (add types to) instructions
-			let ins = match wasm_instruction {
-				PInstruction::Drop => match stack_type.pop().unwrap() {
-					I32 => Either::Left(I32Drop),
-					_ => unimplemented!(),
-				},
-				PInstruction::Select => {
-					stack_type.pop().unwrap();
-					match stack_type.pop().unwrap() {
-						I32 => Either::Left(I32Select),
-						_ => unimplemented!(),
-					}
-				}
-				PInstruction::I32Const(value) => {
-					stack_type.push(I32);
-					Either::Left(I32Const(*value))
-				}
-				PInstruction::GetLocal(index) => match local_types[*index as usize] {
-					I32 => {
-						stack_type.push(I32);
-						Either::Left(I32GetLocal(*index))
-					}
-					_ => unimplemented!(),
-				},
-				PInstruction::SetLocal(index) => match local_types[*index as usize] {
-					I32 => {
-						stack_type.push(I32);
-						Either::Left(I32SetLocal(*index))
-					}
-					_ => unimplemented!(),
-				},
-				PInstruction::TeeLocal(index) => match local_types[*index as usize] {
-					I32 => {
-						stack_type.push(I32);
-						Either::Left(I32TeeLocal(*index))
-					}
-					_ => unimplemented!(),
-				},
-				x => {
-					if let Some(ins) = Instruction::try_convert(x) {
-						let (pops, pushs) = ins.stack_pops_pushs();
-						for _ in pops {
-							stack_type.pop().unwrap();
-						}
-						stack_type.extend(pushs);
+			let either = if let Some(ins) = Instruction::try_convert(wasm_instruction) {
+				let (pops, pushs): (Vec<ValueType>, Vec<ValueType>) = match ins {
+					Unreachable => (vec![], vec![]),
+					Nop => (vec![], vec![]),
 
-						Either::Left(ins)
-					} else {
-						// TODO change stack types
-						Either::Right(x.clone())
+					Const(Value::I32(_)) => (vec![], vec![I32]),
+					Const(_) => unimplemented!(),
+
+					// itestop
+					I32Eqz => (vec![I32], vec![I32]),
+					// irelop
+					I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU
+					| I32GeS | I32GeU => (vec![I32, I32], vec![I32]),
+					// ibinop
+					I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And
+					| I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => {
+						(vec![I32, I32], vec![I32])
 					}
+
+					// parametric
+					Drop => (vec![stack_type[stack_type.len() - 1]], vec![]),
+					Select => (
+						vec![
+							stack_type[stack_type.len() - 2],
+							stack_type[stack_type.len() - 3],
+							I32,
+						],
+						vec![I32],
+					),
+
+					// locals
+					GetLocal(i) => (vec![], vec![local_types[i as usize]]),
+					SetLocal(i) => (vec![local_types[i as usize]], vec![]),
+					TeeLocal(i) => (vec![local_types[i as usize]], vec![local_types[i as usize]]),
+				};
+				for _ in pops {
+					stack_type.pop().unwrap();
 				}
+				stack_type.extend(pushs);
+
+				Either::Left(ins)
+			} else {
+				// TODO change stack types
+				Either::Right(wasm_instruction.clone())
 			};
-			instructions.push(ins);
+			instructions.push(either);
 		}
 
 		// Gather encodable instructions into vector
@@ -186,6 +179,7 @@ fn gather_locals(local_types: &[ValueType]) -> Vec<Local> {
 mod tests {
 	use super::*;
 	use parity_wasm::elements::Instructions;
+	use Value::*;
 
 	#[test]
 	fn convert_test() {
@@ -206,14 +200,14 @@ mod tests {
 			local_types: vec![ValueType::I32; 2],
 			n_params: 0,
 			instructions: vec![Either::Left(vec![
-				Instruction::I32Const(1),
-				Instruction::I32Const(2),
-				Instruction::I32Const(3),
-				Instruction::I32Select,
-				Instruction::I32Drop,
-				Instruction::I32GetLocal(0),
-				Instruction::I32TeeLocal(1),
-				Instruction::I32SetLocal(0),
+				Instruction::Const(I32(1)),
+				Instruction::Const(I32(2)),
+				Instruction::Const(I32(3)),
+				Instruction::Select,
+				Instruction::Drop,
+				Instruction::GetLocal(0),
+				Instruction::TeeLocal(1),
+				Instruction::SetLocal(0),
 			])],
 		};
 		assert_eq!(

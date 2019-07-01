@@ -2,16 +2,14 @@ mod constants;
 mod function;
 mod instructions;
 mod state;
-mod value_type;
 
 pub use crate::{
 	constants::Constants,
 	function::Function,
 	instructions::{stack_depth, Instruction},
 	state::State,
-	value_type::value_type_sort,
 };
-
+use parity_wasm::elements::ValueType;
 use z3::*;
 
 /// a <= b < c
@@ -71,7 +69,7 @@ pub fn equivalent<'ctx>(
 	both_trapped.or(&[&states_equal])
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Value {
 	I32(i32),
 	I64(i64),
@@ -79,10 +77,67 @@ pub enum Value {
 	F64(f64),
 }
 
+impl Value {
+	pub fn encode<'ctx>(&self, ctx: &'ctx Context) -> Ast<'ctx> {
+		let datatype = value_type(ctx);
+
+		let (variant_index, encoded_value) = match self {
+			Value::I32(i) => (0, ctx.from_i32(*i).int2bv(32)),
+			_ => unimplemented!(),
+		};
+
+		datatype.variants[variant_index]
+			.constructor
+			.apply(&[&encoded_value])
+	}
+
+	pub fn decode(v: &Ast, ctx: &Context, model: &Model) -> Self {
+		let dataype = value_type(ctx);
+
+		let index = dataype
+			.variants
+			.iter()
+			.position(|variant| {
+				let active = variant.tester.apply(&[&v]);
+				model.eval(&active).unwrap().as_bool().unwrap()
+			})
+			.unwrap();
+
+		let inner = model
+			.eval(
+				&dataype.variants[index].accessors[0]
+					.apply(&[&v])
+					.bv2int(true),
+			)
+			.unwrap();
+
+		match index {
+			0 => Value::I32(inner.as_i32().unwrap()),
+			1 | 2 | 3 => unimplemented!(),
+			_ => unreachable!(),
+		}
+	}
+}
+
+/// Representation of a value in Z3
+pub fn value_type(ctx: &Context) -> Datatype {
+	DatatypeBuilder::new(ctx)
+		.variant("I32", &[("as_i32", &ctx.bitvector_sort(32))])
+		.finish("Value")
+}
+
+pub fn value_type_to_index(v: &ValueType) -> usize {
+	match v {
+		ValueType::I32 => 0,
+		_ => unimplemented!(),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use Instruction::*;
+	use Value::*;
 
 	#[test]
 	fn stack_depth_test() {
@@ -92,10 +147,10 @@ mod tests {
 		let program = &[I32Add];
 		assert_eq!(stack_depth(program), 2);
 
-		let program = &[I32Const(1), I32Add];
+		let program = &[Const(I32(1)), I32Add];
 		assert_eq!(stack_depth(program), 1);
 
-		let program = &[I32Const(1), I32Const(1), I32Const(1), I32Add];
+		let program = &[Const(I32(1)), Const(I32(1)), Const(I32(1)), I32Add];
 		assert_eq!(stack_depth(program), 0);
 	}
 }

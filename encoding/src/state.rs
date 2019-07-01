@@ -67,9 +67,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let instr = self.program(&pc);
 		let mut conditions = Vec::new();
 		for i in &[
-			Instruction::I32GetLocal(0),
-			Instruction::I32SetLocal(0),
-			Instruction::I32TeeLocal(0),
+			Instruction::GetLocal(0),
+			Instruction::SetLocal(0),
+			Instruction::TeeLocal(0),
 		] {
 			let variant = &instruction_datatype(self.ctx).variants[i.as_usize()];
 			let active = variant.tester.apply(&[&instr]);
@@ -104,8 +104,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	pub fn decode_program(&self, model: &Model) -> Vec<Instruction> {
-		use Instruction::*;
-
 		let program_length = model
 			.eval(&self.program_length())
 			.unwrap()
@@ -118,40 +116,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let pc = self.ctx.from_usize(pc);
 			let encoded_instr = model.eval(&self.program(&pc)).unwrap();
 
-			let decoded = Instruction::iter_templates()
-				.find_map(|template| {
-					let variant = &instruction_datatype(self.ctx).variants[template.as_usize()];
-
-					let active = variant.tester.apply(&[&encoded_instr]);
-					if model.eval(&active).unwrap().as_bool().unwrap() {
-						Some(match template {
-							I32Const(_) => {
-								let ast = variant.accessors[0].apply(&[&encoded_instr]);
-								let v = model.eval(&ast.bv2int(true)).unwrap().as_i32().unwrap();
-								I32Const(v)
-							}
-							I32GetLocal(_) => {
-								let ast = variant.accessors[0].apply(&[&encoded_instr]);
-								let v = model.eval(&ast).unwrap().as_u32().unwrap();
-								I32GetLocal(v)
-							}
-							I32SetLocal(_) => {
-								let ast = variant.accessors[0].apply(&[&encoded_instr]);
-								let v = model.eval(&ast).unwrap().as_u32().unwrap();
-								I32SetLocal(v)
-							}
-							I32TeeLocal(_) => {
-								let ast = variant.accessors[0].apply(&[&encoded_instr]);
-								let v = model.eval(&ast).unwrap().as_u32().unwrap();
-								I32TeeLocal(v)
-							}
-							x => x,
-						})
-					} else {
-						None
-					}
-				})
-				.unwrap();
+			let decoded = Instruction::decode(&encoded_instr, self.ctx, model);
 
 			program.push(decoded);
 		}
@@ -164,7 +129,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let pc_in_range = in_range(&self.ctx.from_usize(0), &pc, &self.program_length());
 
 		// forall initial_stack values and all params and all pcs
-		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
+		let mut bounds: Vec<_> = self.constants.initial_stack_bounds.iter().collect();
 		bounds.push(&pc);
 		let transition = self.transition(&pc);
 		self.ctx
@@ -202,13 +167,20 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let instr = self.program(&pc);
 
 		// ad-hoc conversions
+		let value_type = value_type(self.ctx);
+		let is_i32 = |op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].tester.apply(&[op]) };
+		let as_i32 =
+			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].accessors[0].apply(&[&op]) };
+		let to_i32 =
+			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].constructor.apply(&[&op]) };
+
 		let bool_to_i32 = |b: &Ast<'ctx>| {
 			b.ite(
-				&self.ctx.from_usize(1).int2bv(32),
-				&self.ctx.from_usize(0).int2bv(32),
+				&to_i32(&self.ctx.from_usize(1).int2bv(32)),
+				&to_i32(&self.ctx.from_usize(0).int2bv(32)),
 			)
 		};
-		let mod_n = |b: &Ast<'ctx>, n: usize| b.bvurem(&self.ctx.from_usize(n).int2bv(32));
+		let bvmod32 = |b: &Ast<'ctx>| b.bvurem(&self.ctx.from_usize(32).int2bv(32));
 
 		// constants
 		let zero = self.ctx.from_usize(0);
@@ -226,56 +198,70 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let mut transitions = Vec::new();
 		for (i, variant) in instruction_datatype.variants.iter().enumerate() {
 			let active = variant.tester.apply(&[&instr]);
+			let template = Instruction::iter_templates().nth(i).unwrap();
 
-			let transition = match Instruction::iter_templates().nth(i).unwrap() {
-				Unreachable | Nop | I32Drop => self.ctx.from_bool(true),
+			let correct_type = match template {
+				I32Eqz => is_i32(&op1),
+				// irelop
+				I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU |
+				// ibinop
+				I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr
+				=> is_i32(&op1).and(&[&is_i32(&op2)]),
 
-				I32Const(_) => result._eq(&variant.accessors[0].apply(&[&instr])),
+				// TODO type(op2) == type(op3)
+				Select => is_i32(&op1),
 
-				I32Eqz => result._eq(&bool_to_i32(&op1._eq(&bv_zero))),
-				I32Eq => result._eq(&bool_to_i32(&op2._eq(&op1))),
-				I32Ne => result._eq(&bool_to_i32(&op2._eq(&op1).not())),
-				I32LtS => result._eq(&bool_to_i32(&op2.bvslt(&op1))),
-				I32LtU => result._eq(&bool_to_i32(&op2.bvult(&op1))),
-				I32GtS => result._eq(&bool_to_i32(&op2.bvsgt(&op1))),
-				I32GtU => result._eq(&bool_to_i32(&op2.bvugt(&op1))),
-				I32LeS => result._eq(&bool_to_i32(&op2.bvsle(&op1))),
-				I32LeU => result._eq(&bool_to_i32(&op2.bvule(&op1))),
-				I32GeS => result._eq(&bool_to_i32(&op2.bvsge(&op1))),
-				I32GeU => result._eq(&bool_to_i32(&op2.bvuge(&op1))),
+				_ => self.ctx.from_bool(true),
+			};
 
-				I32Add => result._eq(&op2.bvadd(&op1)),
-				I32Sub => result._eq(&op2.bvsub(&op1)),
-				I32Mul => result._eq(&op2.bvmul(&op1)),
-				I32DivS => result._eq(&op2.bvsdiv(&op1)),
-				I32DivU => result._eq(&op2.bvudiv(&op1)),
-				I32RemS => result._eq(&op2.bvsrem(&op1)),
-				I32RemU => result._eq(&op2.bvurem(&op1)),
-				I32And => result._eq(&op2.bvand(&op1)),
-				I32Or => result._eq(&op2.bvor(&op1)),
-				I32Xor => result._eq(&op2.bvxor(&op1)),
-				I32Shl => result._eq(&op2.bvshl(&mod_n(&op1, 32))),
-				I32ShrS => result._eq(&op2.bvashr(&mod_n(&op1, 32))),
-				I32ShrU => result._eq(&op2.bvlshr(&mod_n(&op1, 32))),
-				I32Rotl => result._eq(&op2.bvrotl(&mod_n(&op1, 32))),
-				I32Rotr => result._eq(&op2.bvrotr(&mod_n(&op1, 32))),
+			let transition = match template {
+				Unreachable | Nop | Drop => self.ctx.from_bool(true),
 
-				I32Select => result._eq(&op1._eq(&bv_zero).ite(&op2, &op3)),
+				Const(_) => result._eq(&variant.accessors[0].apply(&[&instr])),
 
-				// SetLocal and TeeLocal differ in pop count
-				I32GetLocal(_) => {
+				I32Eqz => result._eq(&bool_to_i32(&as_i32(&op1)._eq(&bv_zero))),
+				I32Eq => result._eq(&bool_to_i32(&as_i32(&op2)._eq(&as_i32(&op1)))),
+				I32Ne => result._eq(&bool_to_i32(&as_i32(&op2)._eq(&as_i32(&op1)).not())),
+				I32LtS => result._eq(&bool_to_i32(&as_i32(&op2).bvslt(&as_i32(&op1)))),
+				I32LtU => result._eq(&bool_to_i32(&as_i32(&op2).bvult(&as_i32(&op1)))),
+				I32GtS => result._eq(&bool_to_i32(&as_i32(&op2).bvsgt(&as_i32(&op1)))),
+				I32GtU => result._eq(&bool_to_i32(&as_i32(&op2).bvugt(&as_i32(&op1)))),
+				I32LeS => result._eq(&bool_to_i32(&as_i32(&op2).bvsle(&as_i32(&op1)))),
+				I32LeU => result._eq(&bool_to_i32(&as_i32(&op2).bvule(&as_i32(&op1)))),
+				I32GeS => result._eq(&bool_to_i32(&as_i32(&op2).bvsge(&as_i32(&op1)))),
+				I32GeU => result._eq(&bool_to_i32(&as_i32(&op2).bvuge(&as_i32(&op1)))),
+
+				I32Add => result._eq(&to_i32(&as_i32(&op2).bvadd(&as_i32(&op1)))),
+				I32Sub => result._eq(&to_i32(&as_i32(&op2).bvsub(&as_i32(&op1)))),
+				I32Mul => result._eq(&to_i32(&as_i32(&op2).bvmul(&as_i32(&op1)))),
+				I32DivS => result._eq(&to_i32(&as_i32(&op2).bvsdiv(&as_i32(&op1)))),
+				I32DivU => result._eq(&to_i32(&as_i32(&op2).bvudiv(&as_i32(&op1)))),
+				I32RemS => result._eq(&to_i32(&as_i32(&op2).bvsrem(&as_i32(&op1)))),
+				I32RemU => result._eq(&to_i32(&as_i32(&op2).bvurem(&as_i32(&op1)))),
+				I32And => result._eq(&to_i32(&as_i32(&op2).bvand(&as_i32(&op1)))),
+				I32Or => result._eq(&to_i32(&as_i32(&op2).bvor(&as_i32(&op1)))),
+				I32Xor => result._eq(&to_i32(&as_i32(&op2).bvxor(&as_i32(&op1)))),
+				I32Shl => result._eq(&to_i32(&as_i32(&op2).bvshl(&bvmod32(&as_i32(&op1))))),
+				I32ShrS => result._eq(&to_i32(&as_i32(&op2).bvashr(&bvmod32(&as_i32(&op1))))),
+				I32ShrU => result._eq(&to_i32(&as_i32(&op2).bvlshr(&bvmod32(&as_i32(&op1))))),
+				I32Rotl => result._eq(&to_i32(&as_i32(&op2).bvrotl(&bvmod32(&as_i32(&op1))))),
+				I32Rotr => result._eq(&to_i32(&as_i32(&op2).bvrotr(&bvmod32(&as_i32(&op1))))),
+
+				Select => result._eq(&as_i32(&op1)._eq(&bv_zero).ite(&op2, &op3)),
+
+				GetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
 					let index_in_range = in_range(&zero, &index, &self.n_locals());
 					result._eq(&self.local(&pc, &index)).and(&[&index_in_range])
 				}
-				I32SetLocal(_) => {
+				SetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
 					let index_in_range = in_range(&zero, &index, &self.n_locals());
 					self.local(&pc_next, &index)
 						._eq(&op1)
 						.and(&[&index_in_range])
 				}
-				I32TeeLocal(_) => {
+				TeeLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
 
 					let index_in_range = in_range(&zero, &index, &self.n_locals());
@@ -287,7 +273,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 						.and(&[&index_in_range, &local_set, &stack_set])
 				}
 			};
-			transitions.push(active.implies(&transition));
+
+			transitions.push(active.implies(&transition.and(&[&correct_type])));
 		}
 
 		// create vector of references
@@ -327,12 +314,12 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let variants = &instruction_datatype(self.ctx).variants;
 
 		// disable if set_local
-		let set_local = &variants[Instruction::I32SetLocal(0).as_usize()];
+		let set_local = &variants[Instruction::SetLocal(0).as_usize()];
 		let is_set_local = set_local.tester.apply(&[&instr]);
 		let set_local_index = set_local.accessors[0].apply(&[&instr]);
 		let set_local_active = is_set_local.and(&[&set_local_index._eq(&i)]);
 
-		let tee_local = &variants[Instruction::I32TeeLocal(0).as_usize()];
+		let tee_local = &variants[Instruction::TeeLocal(0).as_usize()];
 		let is_tee_local = tee_local.tester.apply(&[&instr]);
 		let tee_local_index = tee_local.accessors[0].apply(&[&instr]);
 		let tee_local_active = is_tee_local.and(&[&tee_local_index._eq(&i)]);
@@ -358,6 +345,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
 		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
 
+		let value_type = value_type(self.ctx);
+		let as_i32 = |op: &Ast<'ctx>| value_type.variants[0].accessors[0].apply(&[&op]);
+
 		let mut conditions = Vec::new();
 		conditions.push(self.trapped(&pc));
 
@@ -367,10 +357,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let condition = match Instruction::iter_templates().nth(i).unwrap() {
 				Unreachable => self.ctx.from_bool(true),
 
-				I32DivU | I32RemU | I32RemS => op2._eq(&bv_zero),
+				I32DivU | I32RemU | I32RemS => as_i32(&op2)._eq(&bv_zero),
 				I32DivS => {
-					let divide_by_zero = op2._eq(&bv_zero);
-					let overflow = op2.bvsdiv_no_overflow(&op1);
+					let divide_by_zero = as_i32(&op2)._eq(&bv_zero);
+					let overflow = as_i32(&op2).bvsdiv_no_overflow(&as_i32(&op1));
 					divide_by_zero.or(&[&overflow])
 				}
 				_ => continue,
@@ -402,23 +392,10 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				&self.ctx.int_sort(), // instruction counter
 				&self.ctx.int_sort(), // stack address
 			],
-			&self.ctx.bitvector_sort(32),
+			&value_type(self.ctx).sort,
 		);
 
 		stack_func.apply(&[pc, index])
-	}
-
-	pub fn stack_type(&self, pc: &Ast<'ctx>, index: &Ast<'ctx>) -> Ast<'ctx> {
-		let stack_type_func = self.ctx.func_decl(
-			self.ctx.str_sym(&(self.prefix.to_owned() + "stack_type")),
-			&[
-				&self.ctx.int_sort(), // instruction counter
-				&self.ctx.int_sort(), // stack address
-			],
-			&value_type_sort(self.ctx).0,
-		);
-
-		stack_type_func.apply(&[pc, index])
 	}
 
 	pub fn program(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
@@ -435,7 +412,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let local_func = self.ctx.func_decl(
 			self.ctx.str_sym(&(self.prefix.to_owned() + "local")),
 			&[&self.ctx.int_sort(), &self.ctx.int_sort()],
-			&self.ctx.bitvector_sort(32),
+			&value_type(self.ctx).sort,
 		);
 
 		local_func.apply(&[pc, index])
@@ -466,15 +443,15 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use parity_wasm::elements::ValueType::*;
 	use Instruction::*;
+	use Value::*;
 
 	#[test]
 	fn source_program() {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), Nop, I32Const(2), I32Add];
+		let program = &[Const(I32(1)), Nop, Const(I32(2)), I32Add];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -499,7 +476,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), I32Const(2), I32Add];
+		let program = &[Const(I32(1)), Const(I32(2)), I32Add];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -519,7 +496,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), I32Const(2), I32Add];
+		let program = &[Const(I32(1)), Const(I32(2)), I32Add];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -546,7 +523,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), I32Const(2)];
+		let program = &[Const(I32(1)), Const(I32(2))];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -564,7 +541,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1)];
+		let program = &[Const(I32(1))];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -582,8 +559,10 @@ mod tests {
 		};
 		assert_eq!(eval_int(&state.stack_pointer(&ctx.from_usize(1))), 1);
 
+		let value_type = value_type(&ctx);
 		let eval_bv = |ast: &Ast| -> i64 {
-			let evaled = model.eval(&ast.bv2int(true)).unwrap();
+			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
+			let evaled = model.eval(&inner.bv2int(true)).unwrap();
 			evaled.as_i64().unwrap()
 		};
 		assert_eq!(
@@ -597,7 +576,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), Nop, I32Const(2), I32Add];
+		let program = &[Const(I32(1)), Nop, Const(I32(2)), I32Add];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -609,8 +588,10 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
+		let value_type = value_type(&ctx);
 		let eval_bv = |ast: &Ast| -> i64 {
-			let evaled = model.eval(&ast.bv2int(true)).unwrap();
+			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
+			let evaled = model.eval(&inner.bv2int(true)).unwrap();
 			evaled.as_i64().unwrap()
 		};
 		assert_eq!(
@@ -642,7 +623,7 @@ mod tests {
 
 		let program = &[I32Add];
 
-		let constants = Constants::new(&ctx, vec![], &[I32, I32]);
+		let constants = Constants::new(&ctx, vec![], &[ValueType::I32, ValueType::I32]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -652,14 +633,20 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
+		let value_type = value_type(&ctx);
 		let eval_bv = |ast: &Ast| -> i64 {
-			let evaled = model.eval(&ast.bv2int(true)).unwrap();
+			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
+			let evaled = model.eval(&inner.bv2int(true)).unwrap();
 			evaled.as_i64().unwrap()
 		};
-		let sum = constants.initial_stack[0].bvadd(&constants.initial_stack[1]);
+
+		let x0 = value_type.variants[0].accessors[0].apply(&[&constants.initial_stack[0]]);
+		let x1 = value_type.variants[0].accessors[0].apply(&[&constants.initial_stack[1]]);
+		let sum = x0.bvadd(&x1);
+
 		assert_eq!(
 			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
-			eval_bv(&sum)
+			model.eval(&sum.bv2int(true)).unwrap().as_i64().unwrap()
 		);
 	}
 
@@ -668,7 +655,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), I32Drop];
+		let program = &[Const(I32(1)), Drop];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -693,7 +680,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), I32Const(2), I32Const(3), I32Select];
+		let program = &[Const(I32(1)), Const(I32(2)), Const(I32(3)), Select];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -711,16 +698,15 @@ mod tests {
 				.unwrap(),
 			1
 		);
+
+		let value_type = value_type(&ctx);
+		let eval_bv = |ast: &Ast| -> i64 {
+			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
+			let evaled = model.eval(&inner.bv2int(true)).unwrap();
+			evaled.as_i64().unwrap()
+		};
 		assert_eq!(
-			model
-				.eval(
-					&state
-						.stack(&ctx.from_usize(4), &ctx.from_usize(0))
-						.bv2int(false)
-				)
-				.unwrap()
-				.as_usize()
-				.unwrap(),
+			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
 			1
 		);
 	}
@@ -730,7 +716,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(1), I32Const(2), I32Const(0), I32Select];
+		let program = &[Const(I32(1)), Const(I32(2)), Const(I32(0)), Select];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
@@ -739,6 +725,13 @@ mod tests {
 
 		assert!(solver.check());
 		let model = solver.get_model();
+
+		let value_type = value_type(&ctx);
+		let eval_bv = |ast: &Ast| -> i64 {
+			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
+			let evaled = model.eval(&inner.bv2int(true)).unwrap();
+			evaled.as_i64().unwrap()
+		};
 
 		assert_eq!(
 			model
@@ -749,15 +742,7 @@ mod tests {
 			1
 		);
 		assert_eq!(
-			model
-				.eval(
-					&state
-						.stack(&ctx.from_usize(4), &ctx.from_usize(0))
-						.bv2int(false)
-				)
-				.unwrap()
-				.as_usize()
-				.unwrap(),
+			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
 			2
 		);
 	}
@@ -769,22 +754,25 @@ mod tests {
 
 		let program = &[
 			// x2 = x1 + x0
-			I32GetLocal(0),
-			I32GetLocal(1),
+			GetLocal(0),
+			GetLocal(1),
 			I32Add,
-			I32SetLocal(2),
+			SetLocal(2),
 			// swap x0, x1
 			// tmp = x1; x1 = x0; x0 = tmp;
-			I32GetLocal(1),
-			I32GetLocal(0),
-			I32SetLocal(1),
-			I32TeeLocal(0),
+			GetLocal(1),
+			GetLocal(0),
+			SetLocal(1),
+			TeeLocal(0),
 		];
 
+		let value_type = value_type(&ctx);
+		let as_i32 = &value_type.variants[0].accessors[0];
+		let to_i32 = &value_type.variants[0].constructor;
 		let initial_locals = vec![
-			ctx.from_usize(1).int2bv(32),
-			ctx.from_usize(2).int2bv(32),
-			ctx.from_usize(0).int2bv(32),
+			to_i32.apply(&[&ctx.from_usize(1).int2bv(32)]),
+			to_i32.apply(&[&ctx.from_usize(2).int2bv(32)]),
+			to_i32.apply(&[&ctx.from_usize(0).int2bv(32)]),
 		];
 
 		let constants = Constants::new(&ctx, initial_locals, &[]);
@@ -810,11 +798,12 @@ mod tests {
 				.as_usize()
 				.unwrap()
 		};
+
 		let stack = |pc, i| {
 			model
 				.eval(
-					&state
-						.stack(&ctx.from_usize(pc), &ctx.from_usize(i))
+					&as_i32
+						.apply(&[&state.stack(&ctx.from_usize(pc), &ctx.from_usize(i))])
 						.bv2int(false),
 				)
 				.unwrap()
@@ -824,8 +813,8 @@ mod tests {
 		let local = |pc, i| {
 			model
 				.eval(
-					&state
-						.local(&ctx.from_usize(pc), &ctx.from_usize(i))
+					&as_i32
+						.apply(&[&state.local(&ctx.from_usize(pc), &ctx.from_usize(i))])
 						.bv2int(false),
 				)
 				.unwrap()
@@ -895,7 +884,7 @@ mod tests {
 		let ctx = Context::new(&Config::default());
 		let solver = Solver::new(&ctx);
 
-		let program = &[I32Const(0), I32Const(1), I32DivU];
+		let program = &[Const(I32(0)), Const(I32(1)), I32DivU];
 
 		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");

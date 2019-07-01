@@ -1,13 +1,15 @@
 use crate::instructions::*;
+use crate::{value_type, value_type_to_index};
 use parity_wasm::elements::ValueType;
 use z3::*;
 
 /// Encoded types and expressions that are independent of a specific instruction sequence.
 pub struct Constants<'ctx> {
 	pub ctx: &'ctx Context,
-	/// Uninterpreted initial stack values
+	/// Values of the initial stack
 	pub initial_stack: Vec<Ast<'ctx>>,
-	/// Arguments == Values of the first locals
+	/// Z3 constants used in initial_stack
+	pub initial_stack_bounds: Vec<Ast<'ctx>>,
 	pub initial_locals: Vec<Ast<'ctx>>,
 }
 
@@ -17,14 +19,27 @@ impl<'ctx> Constants<'ctx> {
 		initial_locals: Vec<Ast<'ctx>>,
 		initial_stack_types: &[ValueType],
 	) -> Self {
-		let word_sort = ctx.bitvector_sort(32);
-		let initial_stack: Vec<_> = (0..initial_stack_types.len())
-			.map(|_| ctx.fresh_const("initial_stack", &word_sort))
-			.collect();
+		let mut initial_stack = Vec::new();
+		let mut initial_stack_bounds = Vec::new();
+		for ty in initial_stack_types {
+			let datatype = value_type(ctx);
+			let sort = match ty {
+				ValueType::I32 => ctx.bitvector_sort(32),
+				_ => unimplemented!(),
+			};
+			let inner = ctx.fresh_const("initial_stack", &sort);
+			initial_stack_bounds.push(inner.clone());
+
+			let value = datatype.variants[value_type_to_index(ty)]
+				.constructor
+				.apply(&[&inner]);
+			initial_stack.push(value);
+		}
 
 		Self {
 			ctx,
 			initial_stack,
+			initial_stack_bounds,
 			initial_locals,
 		}
 	}

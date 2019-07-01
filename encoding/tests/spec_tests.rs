@@ -1,6 +1,6 @@
-use parity_wasm::elements::{Internal, Module, Type};
-use std::{collections::HashMap, fs::read, iter::repeat};
-use wabt::script::{Action, Action::*, Command, CommandKind, ScriptParser, Value};
+use parity_wasm::elements::{Internal, Module, Type, ValueType};
+use std::{collections::HashMap, fs::read};
+use wabt::script::{Action, Action::*, Command, CommandKind, ScriptParser, Value as ScriptValue};
 use wassup_encoding::*;
 use z3::*;
 
@@ -33,8 +33,10 @@ fn spec_test(name: &str) {
 					}
 				}
 
+				let expected: Vec<_> = expected.iter().cloned().map(value_cast).collect();
+
 				let res = action_result(&modules, action);
-				assert_eq!(res, value_cast(expected[0]));
+				assert_eq!(res, expected[0]);
 			}
 			CommandKind::AssertTrap { .. } => {} // TODO
 			_ => {}
@@ -42,7 +44,7 @@ fn spec_test(name: &str) {
 	}
 }
 
-fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, f64>) -> u32 {
+fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, f64>) -> Value {
 	match action {
 		Invoke {
 			module: module_name,
@@ -69,13 +71,20 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 			let solver = Solver::new(&ctx);
 
 			// create values of initial locals: arguments then 0s for all other locals
+			let args: Vec<_> = args.iter().cloned().map(value_cast).collect();
+			let remaining_locals: Vec<_> = function.local_types[function.n_params..]
+				.iter()
+				.map(|ty| match ty {
+					ValueType::I32 => Value::I32(0),
+					_ => unimplemented!(),
+				})
+				.collect();
 			let initial_locals = args
 				.iter()
-				.cloned()
-				.map(value_cast)
-				.chain(repeat(0).take(function.local_types.len() - function.n_params))
-				.map(|i| ctx.from_u32(i).int2bv(32))
+				.chain(remaining_locals.iter())
+				.map(|v| v.encode(&ctx))
 				.collect();
+
 			let constants = Constants::new(&ctx, initial_locals, params);
 			let state = State::new(&ctx, &solver, &constants, "");
 
@@ -86,15 +95,11 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 			let model = solver.get_model();
 
 			let pc = ctx.from_u64(instr.len() as u64);
-			let i = model
-				.eval(
-					&state
-						.stack(&pc, &state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)]))
-						.bv2int(false),
-				)
-				.unwrap()
-				.as_i64()
-				.unwrap() as u32;
+			let i = Value::decode(
+				&state.stack(&pc, &state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)])),
+				&ctx,
+				&model,
+			);
 			i
 		}
 		// TODO trapped tests
@@ -117,9 +122,9 @@ fn get_function_index(module: &Module, name: &str) -> usize {
 	panic!("function not found");
 }
 
-fn value_cast(v: Value<f32, f64>) -> u32 {
+fn value_cast(v: ScriptValue<f32, f64>) -> Value {
 	match v {
-		Value::I32(i) => i as _,
+		ScriptValue::I32(i) => wassup_encoding::Value::I32(i),
 		_ => unimplemented!(),
 	}
 }

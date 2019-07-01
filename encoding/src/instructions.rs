@@ -1,10 +1,8 @@
-use parity_wasm::elements::{
-	Instruction as PInstruction,
-	ValueType::{self, *},
-};
+use crate::{value_type, Value};
+use parity_wasm::elements::Instruction as PInstruction;
 use z3::*;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 /// Directly encodable Wasm instruction.
 ///
 /// There a few noteworthy differences to parity-wasm's instructions:
@@ -25,12 +23,12 @@ pub enum Instruction {
 
 	// Call(u32),
 	// CallIndirect(u32, u8),
-	I32Drop,
-	I32Select,
+	Drop,
+	Select,
 
-	I32GetLocal(u32),
-	I32SetLocal(u32),
-	I32TeeLocal(u32),
+	GetLocal(u32),
+	SetLocal(u32),
+	TeeLocal(u32),
 	// GetGlobal(u32),
 	// SetGlobal(u32),
 
@@ -60,10 +58,8 @@ pub enum Instruction {
 
 	// CurrentMemory(u8),
 	// GrowMemory(u8),
-	I32Const(i32),
-	// I64Const(i64),
-	// F32Const(u32),
-	// F64Const(u64),
+	Const(Value),
+
 	I32Eqz,
 	I32Eq,
 	I32Ne,
@@ -196,39 +192,27 @@ pub enum Instruction {
 }
 
 impl Instruction {
-	/// Parameters and returns of the instruction
-	pub fn stack_pops_pushs(&self) -> (&'static [ValueType], &'static [ValueType]) {
+	pub fn stack_pop_push_count(&self) -> (usize, usize) {
 		use Instruction::*;
 
 		match self {
-			Unreachable => (&[], &[]),
-			Nop => (&[], &[]),
+			Unreachable | Nop=> (0, 0),
+			Drop =>  (1, 0),
+			Select => (3, 1),
 
-			I32Const(_) => (&[], &[I32]),
+			GetLocal(_) => (0, 1),
+			SetLocal(_) => (1, 0),
+			TeeLocal(_) => (1, 1),
 
-			// itestop
-			I32Eqz => (&[I32], &[I32]),
+			Const(_) => (0, 1),
+
+			I32Eqz => (1, 1),
 			// irelop
-			I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS
-			| I32GeU => (&[I32, I32], &[I32]),
+			I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS |I32GeU |
 			// ibinop
-			I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
-			| I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => (&[I32, I32], &[I32]),
-
-			// parametric
-			I32Drop => (&[I32], &[]),
-			I32Select => (&[I32, I32, I32], &[I32]),
-
-			// locals
-			I32GetLocal(_) => (&[], &[I32]),
-			I32SetLocal(_) => (&[I32], &[]),
-			I32TeeLocal(_) => (&[I32], &[I32]),
+			I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr
+			=> (2, 1)
 		}
-	}
-
-	pub fn stack_pop_push_count(&self) -> (usize, usize) {
-		let (pops, pushs) = self.stack_pops_pushs();
-		(pops.len(), pushs.len())
 	}
 
 	pub fn try_convert(pi: &PInstruction) -> Option<Self> {
@@ -237,8 +221,14 @@ impl Instruction {
 		match pi {
 			Unreachable => Some(Instruction::Unreachable),
 			Nop => Some(Instruction::Nop),
+			Drop => Some(Instruction::Drop),
+			Select => Some(Instruction::Select),
 
-			I32Const(i) => Some(Instruction::I32Const(*i)),
+			GetLocal(i) => Some(Instruction::GetLocal(*i)),
+			SetLocal(i) => Some(Instruction::SetLocal(*i)),
+			TeeLocal(i) => Some(Instruction::TeeLocal(*i)),
+
+			I32Const(i) => Some(Instruction::Const(Value::I32(*i))),
 
 			I32Eqz => Some(Instruction::I32Eqz),
 			I32Eq => Some(Instruction::I32Eq),
@@ -277,12 +267,12 @@ impl Instruction {
 		[
 			Unreachable,
 			Nop,
-			I32Drop,
-			I32Select,
-			I32GetLocal(0),
-			I32SetLocal(0),
-			I32TeeLocal(0),
-			I32Const(0),
+			Drop,
+			Select,
+			GetLocal(0),
+			SetLocal(0),
+			TeeLocal(0),
+			Const(Value::I32(0)),
 			I32Eqz,
 			I32Eq,
 			I32Ne,
@@ -331,12 +321,50 @@ impl Instruction {
 
 		let constructor = &instruction_datatype(ctx).variants[self.as_usize()].constructor;
 		match self {
-			I32Const(i) => constructor.apply(&[&ctx.from_i32(*i).int2bv(32)]),
-			I32GetLocal(i) | I32SetLocal(i) | I32TeeLocal(i) => {
-				constructor.apply(&[&ctx.from_u32(*i)])
-			}
+			Const(i) => constructor.apply(&[&i.encode(ctx)]),
+			GetLocal(i) | SetLocal(i) | TeeLocal(i) => constructor.apply(&[&ctx.from_u32(*i)]),
 			_ => constructor.apply(&[]),
 		}
+	}
+
+	pub fn decode(encoded_instr: &Ast, ctx: &Context, model: &Model) -> Self {
+		use Instruction::*;
+
+		Instruction::iter_templates()
+			.find_map(|template| {
+				let variant = &instruction_datatype(ctx).variants[template.as_usize()];
+
+				let active = variant.tester.apply(&[&encoded_instr]);
+				if model.eval(&active).unwrap().as_bool().unwrap() {
+					Some(match template {
+						Const(_) => {
+							let encoded_value = variant.accessors[0].apply(&[&encoded_instr]);
+							let value = Value::decode(&encoded_value, ctx, model);
+
+							Const(value)
+						}
+						GetLocal(_) => {
+							let ast = variant.accessors[0].apply(&[&encoded_instr]);
+							let v = model.eval(&ast).unwrap().as_u32().unwrap();
+							GetLocal(v)
+						}
+						SetLocal(_) => {
+							let ast = variant.accessors[0].apply(&[&encoded_instr]);
+							let v = model.eval(&ast).unwrap().as_u32().unwrap();
+							SetLocal(v)
+						}
+						TeeLocal(_) => {
+							let ast = variant.accessors[0].apply(&[&encoded_instr]);
+							let v = model.eval(&ast).unwrap().as_u32().unwrap();
+							TeeLocal(v)
+						}
+						x => x,
+					})
+				} else {
+					None
+				}
+			})
+			.unwrap()
 	}
 }
 
@@ -349,13 +377,14 @@ impl From<Instruction> for PInstruction {
 			Unreachable => PInstruction::Unreachable,
 			Nop => PInstruction::Nop,
 
-			I32Drop => PInstruction::Drop,
-			I32Select => PInstruction::Select,
+			Drop => PInstruction::Drop,
+			Select => PInstruction::Select,
 
-			I32Const(i) => PInstruction::I32Const(i),
-			I32GetLocal(i) => PInstruction::GetLocal(i),
-			I32SetLocal(i) => PInstruction::SetLocal(i),
-			I32TeeLocal(i) => PInstruction::TeeLocal(i),
+			Const(Value::I32(i)) => PInstruction::I32Const(i),
+			Const(_) => unimplemented!(),
+			GetLocal(i) => PInstruction::GetLocal(i),
+			SetLocal(i) => PInstruction::SetLocal(i),
+			TeeLocal(i) => PInstruction::TeeLocal(i),
 
 			I32Eqz => PInstruction::I32Eqz,
 			I32Eq => PInstruction::I32Eq,
@@ -393,19 +422,19 @@ impl From<Instruction> for PInstruction {
 /// Instructions are indexed according to their enum discriminant.
 pub fn instruction_datatype(ctx: &Context) -> Datatype {
 	let mut datatype = DatatypeBuilder::new(ctx);
+	let value_sort = value_type(ctx).sort;
 
-	let bv_32 = ctx.bitvector_sort(32);
 	for i in Instruction::iter_templates() {
 		datatype = match i {
-			Instruction::I32Const(_) => datatype.variant("I32Const", &[("value", &bv_32)]),
-			Instruction::I32GetLocal(_) => {
-				datatype.variant("I32GetLocal", &[("get_local_index", &ctx.int_sort())])
+			Instruction::Const(_) => datatype.variant("Const", &[("value", &value_sort)]),
+			Instruction::GetLocal(_) => {
+				datatype.variant("GetLocal", &[("get_local_index", &ctx.int_sort())])
 			}
-			Instruction::I32SetLocal(_) => {
-				datatype.variant("I32SetLocal", &[("set_local_index", &ctx.int_sort())])
+			Instruction::SetLocal(_) => {
+				datatype.variant("SetLocal", &[("set_local_index", &ctx.int_sort())])
 			}
-			Instruction::I32TeeLocal(_) => {
-				datatype.variant("I32TeeLocal", &[("tee_local_index", &ctx.int_sort())])
+			Instruction::TeeLocal(_) => {
+				datatype.variant("TeeLocal", &[("tee_local_index", &ctx.int_sort())])
 			}
 			x => {
 				let name = format!("{:?}", x);
@@ -434,6 +463,7 @@ pub fn stack_depth(program: &[Instruction]) -> usize {
 mod tests {
 	use super::*;
 	use crate::Constants;
+	use Value::*;
 
 	#[test]
 	fn test_stack_pop_push_count() {
@@ -467,11 +497,11 @@ mod tests {
 			1
 		);
 		assert_eq!(
-			eval(&constants.stack_pop_count(&Instruction::I32Const(0).encode(&ctx))),
+			eval(&constants.stack_pop_count(&Instruction::Const(I32(0)).encode(&ctx))),
 			0
 		);
 		assert_eq!(
-			eval(&constants.stack_push_count(&Instruction::I32Const(0).encode(&ctx))),
+			eval(&constants.stack_push_count(&Instruction::Const(I32(0)).encode(&ctx))),
 			1
 		);
 	}
