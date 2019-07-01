@@ -86,12 +86,16 @@ pub fn superoptimize_snippet(
 			target_length,
 			&ctx.from_usize(current_best.len()),
 		));
-		// assert programs are equivalent
-		solver.assert(&equivalent(
-			&source_state,
-			&ctx.from_usize(source_program.len()),
-			&target_state,
-			&target_length,
+
+		// assert programs are equivalent for all local variables
+		solver.assert(&ctx.forall_const(
+			&initial_locals,
+			&equivalent(
+				&source_state,
+				&ctx.from_usize(source_program.len()),
+				&target_state,
+				&target_length,
+			),
 		));
 
 		if !solver.check() {
