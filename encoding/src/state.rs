@@ -40,11 +40,9 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// set stack_counter(0) = initial_stack.len()
 		self.solver.assert(
-			&self.stack_pointer(&self.ctx.from_usize(0))._eq(
-				&self
-					.ctx
-					.from_usize(self.constants.initial_stack_types.len()),
-			),
+			&self
+				.stack_pointer(&self.ctx.from_usize(0))
+				._eq(&self.ctx.from_usize(self.constants.initial_stack.len())),
 		);
 
 		// set n_locals = initial_locals.len()

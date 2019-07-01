@@ -7,8 +7,6 @@ pub struct Constants<'ctx> {
 	pub ctx: &'ctx Context,
 	/// Uninterpreted initial stack values
 	pub initial_stack: Vec<Ast<'ctx>>,
-	/// Type of the initial stack
-	pub initial_stack_types: Vec<ValueType>,
 	/// Arguments == Values of the first locals
 	pub initial_locals: Vec<Ast<'ctx>>,
 }
@@ -27,7 +25,6 @@ impl<'ctx> Constants<'ctx> {
 		Self {
 			ctx,
 			initial_stack,
-			initial_stack_types: initial_stack_types.to_vec(),
 			initial_locals,
 		}
 	}
