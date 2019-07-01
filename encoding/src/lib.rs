@@ -43,8 +43,24 @@ pub fn equivalent<'ctx>(
 		ctx.forall_const(&[&n], &n_in_range.implies(&condition))
 	};
 
-	ctx.from_bool(true)
-		.and(&[&stack_pointers_equal, &stacks_equal])
+	// require that both states have the same number of locals and that they are all equal
+	// TODO maybe relax this in the future for more optimization potential
+	let n_locals_equal = lhs.n_locals()._eq(&rhs.n_locals());
+	let locals_equal = {
+		let n = ctx.named_int_const("n");
+		let n_in_range = in_range(&ctx.from_u64(0), &n, &lhs.n_locals());
+
+		let condition = lhs.local(&lhs_pc, &n)._eq(&rhs.local(&rhs_pc, &n));
+
+		ctx.forall_const(&[&n], &n_in_range.implies(&condition))
+	};
+
+	ctx.from_bool(true).and(&[
+		&stack_pointers_equal,
+		&stacks_equal,
+		&n_locals_equal,
+		&locals_equal,
+	])
 }
 
 #[derive(Clone, Debug, PartialEq)]

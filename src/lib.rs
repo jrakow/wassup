@@ -126,17 +126,12 @@ mod tests {
 	}
 
 	#[test]
-	fn superoptimize_setlocal_0() {
-		let source_program = &[I32Const(0), I32SetLocal(0)];
-		let target = superoptimize_snippet(source_program, 0);
-		assert_eq!(target, vec![]);
-	}
-
-	#[test]
-	#[ignore] // TODO
+	#[ignore]
 	fn no_superoptimize_setlocal() {
 		let source_program = &[I32Const(3), I32SetLocal(0)];
-		let target = superoptimize_snippet(source_program, 1);
+
+		// no optimization possible, because locals cannot be changed
+		let target = superoptimize_snippet(source_program, 0);
 		assert_eq!(target, source_program);
 	}
 }
