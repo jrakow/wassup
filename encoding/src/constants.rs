@@ -25,6 +25,7 @@ impl<'ctx> Constants<'ctx> {
 			let datatype = value_type(ctx);
 			let sort = match ty {
 				ValueType::I32 => ctx.bitvector_sort(32),
+				ValueType::I64 => ctx.bitvector_sort(64),
 				_ => unimplemented!(),
 			};
 			let inner = ctx.fresh_const("initial_stack", &sort);

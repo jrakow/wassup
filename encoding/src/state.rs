@@ -169,10 +169,15 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// ad-hoc conversions
 		let value_type = value_type(self.ctx);
 		let is_i32 = |op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].tester.apply(&[op]) };
+		let is_i64 = |op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[1].tester.apply(&[op]) };
 		let as_i32 =
 			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].accessors[0].apply(&[&op]) };
+		let as_i64 =
+			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[1].accessors[0].apply(&[&op]) };
 		let to_i32 =
 			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].constructor.apply(&[&op]) };
+		let to_i64 =
+			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[1].constructor.apply(&[&op]) };
 
 		let bool_to_i32 = |b: &Ast<'ctx>| {
 			b.ite(
@@ -181,10 +186,12 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			)
 		};
 		let bvmod32 = |b: &Ast<'ctx>| b.bvurem(&self.ctx.from_usize(32).int2bv(32));
+		let bvmod64 = |b: &Ast<'ctx>| b.bvurem(&self.ctx.from_usize(64).int2bv(64));
 
 		// constants
 		let zero = self.ctx.from_usize(0);
-		let bv_zero = self.ctx.from_usize(0).int2bv(32);
+		let bv32_zero = self.ctx.from_usize(0).int2bv(32);
+		let bv64_zero = self.ctx.from_usize(0).int2bv(64);
 		let pc_next = &pc.add(&[&self.ctx.from_usize(1)]);
 
 		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
@@ -208,6 +215,13 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr
 				=> is_i32(&op1).and(&[&is_i32(&op2)]),
 
+				I64Eqz => is_i64(&op1),
+				// irelop
+				I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS | I64GeU |
+				// ibinop
+				I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr
+				=> is_i64(&op1).and(&[&is_i64(&op2)]),
+
 				// TODO type(op2) == type(op3)
 				Select => is_i32(&op1),
 
@@ -219,7 +233,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 				Const(_) => result._eq(&variant.accessors[0].apply(&[&instr])),
 
-				I32Eqz => result._eq(&bool_to_i32(&as_i32(&op1)._eq(&bv_zero))),
+				I32Eqz => result._eq(&bool_to_i32(&as_i32(&op1)._eq(&bv32_zero))),
 				I32Eq => result._eq(&bool_to_i32(&as_i32(&op2)._eq(&as_i32(&op1)))),
 				I32Ne => result._eq(&bool_to_i32(&as_i32(&op2)._eq(&as_i32(&op1)).not())),
 				I32LtS => result._eq(&bool_to_i32(&as_i32(&op2).bvslt(&as_i32(&op1)))),
@@ -230,6 +244,18 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				I32LeU => result._eq(&bool_to_i32(&as_i32(&op2).bvule(&as_i32(&op1)))),
 				I32GeS => result._eq(&bool_to_i32(&as_i32(&op2).bvsge(&as_i32(&op1)))),
 				I32GeU => result._eq(&bool_to_i32(&as_i32(&op2).bvuge(&as_i32(&op1)))),
+
+				I64Eqz => result._eq(&bool_to_i32(&as_i64(&op1)._eq(&bv64_zero))),
+				I64Eq => result._eq(&bool_to_i32(&as_i64(&op2)._eq(&as_i64(&op1)))),
+				I64Ne => result._eq(&bool_to_i32(&as_i64(&op2)._eq(&as_i64(&op1)).not())),
+				I64LtS => result._eq(&bool_to_i32(&as_i64(&op2).bvslt(&as_i64(&op1)))),
+				I64LtU => result._eq(&bool_to_i32(&as_i64(&op2).bvult(&as_i64(&op1)))),
+				I64GtS => result._eq(&bool_to_i32(&as_i64(&op2).bvsgt(&as_i64(&op1)))),
+				I64GtU => result._eq(&bool_to_i32(&as_i64(&op2).bvugt(&as_i64(&op1)))),
+				I64LeS => result._eq(&bool_to_i32(&as_i64(&op2).bvsle(&as_i64(&op1)))),
+				I64LeU => result._eq(&bool_to_i32(&as_i64(&op2).bvule(&as_i64(&op1)))),
+				I64GeS => result._eq(&bool_to_i32(&as_i64(&op2).bvsge(&as_i64(&op1)))),
+				I64GeU => result._eq(&bool_to_i32(&as_i64(&op2).bvuge(&as_i64(&op1)))),
 
 				I32Add => result._eq(&to_i32(&as_i32(&op2).bvadd(&as_i32(&op1)))),
 				I32Sub => result._eq(&to_i32(&as_i32(&op2).bvsub(&as_i32(&op1)))),
@@ -247,7 +273,23 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				I32Rotl => result._eq(&to_i32(&as_i32(&op2).bvrotl(&bvmod32(&as_i32(&op1))))),
 				I32Rotr => result._eq(&to_i32(&as_i32(&op2).bvrotr(&bvmod32(&as_i32(&op1))))),
 
-				Select => result._eq(&as_i32(&op1)._eq(&bv_zero).ite(&op2, &op3)),
+				I64Add => result._eq(&to_i64(&as_i64(&op2).bvadd(&as_i64(&op1)))),
+				I64Sub => result._eq(&to_i64(&as_i64(&op2).bvsub(&as_i64(&op1)))),
+				I64Mul => result._eq(&to_i64(&as_i64(&op2).bvmul(&as_i64(&op1)))),
+				I64DivS => result._eq(&to_i64(&as_i64(&op2).bvsdiv(&as_i64(&op1)))),
+				I64DivU => result._eq(&to_i64(&as_i64(&op2).bvudiv(&as_i64(&op1)))),
+				I64RemS => result._eq(&to_i64(&as_i64(&op2).bvsrem(&as_i64(&op1)))),
+				I64RemU => result._eq(&to_i64(&as_i64(&op2).bvurem(&as_i64(&op1)))),
+				I64And => result._eq(&to_i64(&as_i64(&op2).bvand(&as_i64(&op1)))),
+				I64Or => result._eq(&to_i64(&as_i64(&op2).bvor(&as_i64(&op1)))),
+				I64Xor => result._eq(&to_i64(&as_i64(&op2).bvxor(&as_i64(&op1)))),
+				I64Shl => result._eq(&to_i64(&as_i64(&op2).bvshl(&bvmod64(&as_i64(&op1))))),
+				I64ShrS => result._eq(&to_i64(&as_i64(&op2).bvashr(&bvmod64(&as_i64(&op1))))),
+				I64ShrU => result._eq(&to_i64(&as_i64(&op2).bvlshr(&bvmod64(&as_i64(&op1))))),
+				I64Rotl => result._eq(&to_i64(&as_i64(&op2).bvrotl(&bvmod64(&as_i64(&op1))))),
+				I64Rotr => result._eq(&to_i64(&as_i64(&op2).bvrotr(&bvmod64(&as_i64(&op1))))),
+
+				Select => result._eq(&as_i32(&op1)._eq(&bv32_zero).ite(&op2, &op3)),
 
 				GetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);

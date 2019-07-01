@@ -72,17 +72,17 @@ pub enum Instruction {
 	I32GeS,
 	I32GeU,
 
-	// I64Eqz,
-	// I64Eq,
-	// I64Ne,
-	// I64LtS,
-	// I64LtU,
-	// I64GtS,
-	// I64GtU,
-	// I64LeS,
-	// I64LeU,
-	// I64GeS,
-	// I64GeU,
+	I64Eqz,
+	I64Eq,
+	I64Ne,
+	I64LtS,
+	I64LtU,
+	I64GtS,
+	I64GtU,
+	I64LeS,
+	I64LeU,
+	I64GeS,
+	I64GeU,
 
 	// F32Eq,
 	// F32Ne,
@@ -119,21 +119,21 @@ pub enum Instruction {
 	// I64Clz,
 	// I64Ctz,
 	// I64Popcnt,
-	// I64Add,
-	// I64Sub,
-	// I64Mul,
-	// I64DivS,
-	// I64DivU,
-	// I64RemS,
-	// I64RemU,
-	// I64And,
-	// I64Or,
-	// I64Xor,
-	// I64Shl,
-	// I64ShrS,
-	// I64ShrU,
-	// I64Rotl,
-	// I64Rotr,
+	I64Add,
+	I64Sub,
+	I64Mul,
+	I64DivS,
+	I64DivU,
+	I64RemS,
+	I64RemU,
+	I64And,
+	I64Or,
+	I64Xor,
+	I64Shl,
+	I64ShrS,
+	I64ShrU,
+	I64Rotl,
+	I64Rotr,
 	// F32Abs,
 	// F32Neg,
 	// F32Ceil,
@@ -206,11 +206,15 @@ impl Instruction {
 
 			Const(_) => (0, 1),
 
-			I32Eqz => (1, 1),
-			// irelop
+			I32Eqz | I64Eqz => (1, 1),
+			// i32 relop
 			I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS |I32GeU |
-			// ibinop
-			I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr
+			// i64 relop
+			I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS |I64GeU |
+			// i64 binop
+			I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr |
+			// i64 binop
+			I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr
 			=> (2, 1)
 		}
 	}
@@ -229,6 +233,7 @@ impl Instruction {
 			TeeLocal(i) => Some(Instruction::TeeLocal(*i)),
 
 			I32Const(i) => Some(Instruction::Const(Value::I32(*i))),
+			I64Const(i) => Some(Instruction::Const(Value::I64(*i))),
 
 			I32Eqz => Some(Instruction::I32Eqz),
 			I32Eq => Some(Instruction::I32Eq),
@@ -241,6 +246,18 @@ impl Instruction {
 			I32LeU => Some(Instruction::I32LeU),
 			I32GeS => Some(Instruction::I32GeS),
 			I32GeU => Some(Instruction::I32GeU),
+
+			I64Eqz => Some(Instruction::I64Eqz),
+			I64Eq => Some(Instruction::I64Eq),
+			I64Ne => Some(Instruction::I64Ne),
+			I64LtS => Some(Instruction::I64LtS),
+			I64LtU => Some(Instruction::I64LtU),
+			I64GtS => Some(Instruction::I64GtS),
+			I64GtU => Some(Instruction::I64GtU),
+			I64LeS => Some(Instruction::I64LeS),
+			I64LeU => Some(Instruction::I64LeU),
+			I64GeS => Some(Instruction::I64GeS),
+			I64GeU => Some(Instruction::I64GeU),
 
 			I32Add => Some(Instruction::I32Add),
 			I32Sub => Some(Instruction::I32Sub),
@@ -257,6 +274,22 @@ impl Instruction {
 			I32ShrU => Some(Instruction::I32ShrU),
 			I32Rotl => Some(Instruction::I32Rotl),
 			I32Rotr => Some(Instruction::I32Rotr),
+
+			I64Add => Some(Instruction::I64Add),
+			I64Sub => Some(Instruction::I64Sub),
+			I64Mul => Some(Instruction::I64Mul),
+			I64DivS => Some(Instruction::I64DivS),
+			I64DivU => Some(Instruction::I64DivU),
+			I64RemS => Some(Instruction::I64RemS),
+			I64RemU => Some(Instruction::I64RemU),
+			I64And => Some(Instruction::I64And),
+			I64Or => Some(Instruction::I64Or),
+			I64Xor => Some(Instruction::I64Xor),
+			I64Shl => Some(Instruction::I64Shl),
+			I64ShrS => Some(Instruction::I64ShrS),
+			I64ShrU => Some(Instruction::I64ShrU),
+			I64Rotl => Some(Instruction::I64Rotl),
+			I64Rotr => Some(Instruction::I64Rotr),
 
 			_ => None,
 		}
@@ -284,6 +317,17 @@ impl Instruction {
 			I32LeU,
 			I32GeS,
 			I32GeU,
+			I64Eqz,
+			I64Eq,
+			I64Ne,
+			I64LtS,
+			I64LtU,
+			I64GtS,
+			I64GtU,
+			I64LeS,
+			I64LeU,
+			I64GeS,
+			I64GeU,
 			I32Add,
 			I32Sub,
 			I32Mul,
@@ -299,6 +343,21 @@ impl Instruction {
 			I32ShrU,
 			I32Rotl,
 			I32Rotr,
+			I64Add,
+			I64Sub,
+			I64Mul,
+			I64DivS,
+			I64DivU,
+			I64RemS,
+			I64RemU,
+			I64And,
+			I64Or,
+			I64Xor,
+			I64Shl,
+			I64ShrS,
+			I64ShrU,
+			I64Rotl,
+			I64Rotr,
 		]
 		.iter()
 		.cloned()
@@ -381,6 +440,7 @@ impl From<Instruction> for PInstruction {
 			Select => PInstruction::Select,
 
 			Const(Value::I32(i)) => PInstruction::I32Const(i),
+			Const(Value::I64(i)) => PInstruction::I64Const(i),
 			Const(_) => unimplemented!(),
 			GetLocal(i) => PInstruction::GetLocal(i),
 			SetLocal(i) => PInstruction::SetLocal(i),
@@ -398,6 +458,18 @@ impl From<Instruction> for PInstruction {
 			I32GeS => PInstruction::I32GeS,
 			I32GeU => PInstruction::I32GeU,
 
+			I64Eqz => PInstruction::I64Eqz,
+			I64Eq => PInstruction::I64Eq,
+			I64Ne => PInstruction::I64Ne,
+			I64LtS => PInstruction::I64LtS,
+			I64LtU => PInstruction::I64LtU,
+			I64GtS => PInstruction::I64GtS,
+			I64GtU => PInstruction::I64GtU,
+			I64LeS => PInstruction::I64LeS,
+			I64LeU => PInstruction::I64LeU,
+			I64GeS => PInstruction::I64GeS,
+			I64GeU => PInstruction::I64GeU,
+
 			I32Add => PInstruction::I32Add,
 			I32Sub => PInstruction::I32Sub,
 			I32Mul => PInstruction::I32Mul,
@@ -413,6 +485,22 @@ impl From<Instruction> for PInstruction {
 			I32ShrU => PInstruction::I32ShrU,
 			I32Rotl => PInstruction::I32Rotl,
 			I32Rotr => PInstruction::I32Rotr,
+
+			I64Add => PInstruction::I64Add,
+			I64Sub => PInstruction::I64Sub,
+			I64Mul => PInstruction::I64Mul,
+			I64DivS => PInstruction::I64DivS,
+			I64DivU => PInstruction::I64DivU,
+			I64RemS => PInstruction::I64RemS,
+			I64RemU => PInstruction::I64RemU,
+			I64And => PInstruction::I64And,
+			I64Or => PInstruction::I64Or,
+			I64Xor => PInstruction::I64Xor,
+			I64Shl => PInstruction::I64Shl,
+			I64ShrS => PInstruction::I64ShrS,
+			I64ShrU => PInstruction::I64ShrU,
+			I64Rotl => PInstruction::I64Rotl,
+			I64Rotr => PInstruction::I64Rotr,
 		}
 	}
 }

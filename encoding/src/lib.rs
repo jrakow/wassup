@@ -83,6 +83,7 @@ impl Value {
 
 		let (variant_index, encoded_value) = match self {
 			Value::I32(i) => (0, ctx.from_i32(*i).int2bv(32)),
+			Value::I64(i) => (1, ctx.from_i64(*i).int2bv(64)),
 			_ => unimplemented!(),
 		};
 
@@ -113,7 +114,8 @@ impl Value {
 
 		match index {
 			0 => Value::I32(inner.as_i32().unwrap()),
-			1 | 2 | 3 => unimplemented!(),
+			1 => Value::I64(inner.as_i64().unwrap()),
+			2 | 3 => unimplemented!(),
 			_ => unreachable!(),
 		}
 	}
@@ -123,12 +125,14 @@ impl Value {
 pub fn value_type(ctx: &Context) -> Datatype {
 	DatatypeBuilder::new(ctx)
 		.variant("I32", &[("as_i32", &ctx.bitvector_sort(32))])
+		.variant("I64", &[("as_i64", &ctx.bitvector_sort(64))])
 		.finish("Value")
 }
 
 pub fn value_type_to_index(v: &ValueType) -> usize {
 	match v {
 		ValueType::I32 => 0,
+		ValueType::I64 => 1,
 		_ => unimplemented!(),
 	}
 }

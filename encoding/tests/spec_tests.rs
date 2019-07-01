@@ -9,6 +9,11 @@ fn test_i32() {
 	spec_test("i32.wast")
 }
 
+#[test]
+fn test_i64() {
+	spec_test("i64.wast")
+}
+
 fn spec_test(name: &str) {
 	let source = read("tests/spec_tests/".to_owned() + name).unwrap();
 
@@ -76,6 +81,7 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 				.iter()
 				.map(|ty| match ty {
 					ValueType::I32 => Value::I32(0),
+					ValueType::I64 => Value::I64(0),
 					_ => unimplemented!(),
 				})
 				.collect();
@@ -125,6 +131,7 @@ fn get_function_index(module: &Module, name: &str) -> usize {
 fn value_cast(v: ScriptValue<f32, f64>) -> Value {
 	match v {
 		ScriptValue::I32(i) => wassup_encoding::Value::I32(i),
+		ScriptValue::I64(i) => wassup_encoding::Value::I64(i),
 		_ => unimplemented!(),
 	}
 }

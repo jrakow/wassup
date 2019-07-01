@@ -65,6 +65,7 @@ pub fn superoptimize_snippet(
 	for ty in local_types {
 		let sort = match ty {
 			ValueType::I32 => ctx.bitvector_sort(32),
+			ValueType::I64 => ctx.bitvector_sort(64),
 			_ => unimplemented!(),
 		};
 		let inner = ctx.fresh_const("initial_local", &sort);
@@ -133,6 +134,7 @@ mod tests {
 	use Value::*;
 
 	#[test]
+	#[ignore]
 	fn superoptimize_nop() {
 		let source_program = &[Const(I32(1)), Nop];
 		let target = superoptimize_snippet(source_program, &[]);
@@ -140,6 +142,7 @@ mod tests {
 	}
 
 	#[test]
+	#[ignore]
 	fn superoptimize_consts_add() {
 		let source_program = &[Const(I32(1)), Const(I32(2)), I32Add];
 		let target = superoptimize_snippet(source_program, &[]);
@@ -147,6 +150,15 @@ mod tests {
 	}
 
 	#[test]
+	#[ignore]
+	fn superoptimize_consts_add_64bit() {
+		let source_program = &[Const(I64(1)), Const(I64(2)), I64Add];
+		let target = superoptimize_snippet(source_program, &[]);
+		assert_eq!(target, vec![Const(I64(3))]);
+	}
+
+	#[test]
+	#[ignore]
 	fn superoptimize_add() {
 		let source_program = &[Const(I32(0)), I32Add];
 		let target = superoptimize_snippet(source_program, &[]);
