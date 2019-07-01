@@ -47,27 +47,18 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			),
 		);
 
-		// set params
-		for (i, var) in self.constants.params.iter().enumerate() {
+		// set n_locals = initial_locals.len()
+		let n_locals = self.ctx.from_usize(self.constants.initial_locals.len());
+		self.solver.assert(&self.n_locals()._eq(&n_locals));
+
+		// set local(0, i) = inital_locals[i]
+		for (i, var) in self.constants.initial_locals.iter().enumerate() {
 			self.solver.assert(
 				&self
 					.local(&self.ctx.from_usize(0), &self.ctx.from_usize(i))
 					._eq(&var),
 			);
 		}
-
-		// force n_locals to be >= n_params
-		let n_params = self.ctx.from_usize(self.constants.params.len());
-		self.solver.assert(&self.n_locals().ge(&n_params));
-
-		// set remaining locals to 0
-		let n = self.ctx.named_int_const("n");
-		let bv_zero = self.ctx.from_usize(0).int2bv(32);
-		let n_in_range = in_range(&n_params, &n, &self.n_locals());
-		self.solver.assert(&self.ctx.forall_const(
-			&[&n],
-			&n_in_range.implies(&self.local(&self.ctx.from_usize(0), &n)._eq(&bv_zero)),
-		));
 
 		// constrain 0 <= local_index < n_locals
 		let pc = self.ctx.named_int_const("pc");
@@ -166,24 +157,16 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		program
 	}
 
-	pub fn assert_transitions(&self) {
+	pub fn transitions(&self) -> Ast<'ctx> {
 		let pc = self.ctx.named_int_const("pc");
 		let pc_in_range = in_range(&self.ctx.from_usize(0), &pc, &self.program_length());
 
 		// forall initial_stack values and all params and all pcs
-		let mut bounds: Vec<_> = self
-			.constants
-			.initial_stack
-			.iter()
-			.chain(self.constants.params.iter())
-			.collect();
+		let mut bounds: Vec<_> = self.constants.initial_stack.iter().collect();
 		bounds.push(&pc);
 		let transition = self.transition(&pc);
-		self.solver.assert(
-			&self
-				.ctx
-				.forall_const(&bounds, &pc_in_range.implies(&transition)),
-		);
+		self.ctx
+			.forall_const(&bounds, &pc_in_range.implies(&transition))
 	}
 
 	fn transition(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
@@ -444,7 +427,7 @@ mod tests {
 
 		let program = &[I32Const(1), Nop, I32Const(2), I32Add];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -469,7 +452,7 @@ mod tests {
 
 		let program = &[I32Const(1), I32Const(2), I32Add];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -489,12 +472,12 @@ mod tests {
 
 		let program = &[I32Const(1), I32Const(2), I32Add];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 
-		state.assert_transitions();
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -516,7 +499,7 @@ mod tests {
 
 		let program = &[I32Const(1), I32Const(2)];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -534,12 +517,12 @@ mod tests {
 
 		let program = &[I32Const(1)];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 
-		state.assert_transitions();
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -567,12 +550,12 @@ mod tests {
 
 		let program = &[I32Const(1), Nop, I32Const(2), I32Add];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 
-		state.assert_transitions();
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -610,12 +593,12 @@ mod tests {
 
 		let program = &[I32Add];
 
-		let constants = Constants::new(&ctx, 0, &[I32, I32]);
+		let constants = Constants::new(&ctx, vec![], &[I32, I32]);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
 
-		state.assert_transitions();
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -638,10 +621,10 @@ mod tests {
 
 		let program = &[I32Const(1), I32Drop];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
-		state.assert_transitions();
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -663,10 +646,10 @@ mod tests {
 
 		let program = &[I32Const(1), I32Const(2), I32Const(3), I32Select];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
-		state.assert_transitions();
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -700,10 +683,10 @@ mod tests {
 
 		let program = &[I32Const(1), I32Const(2), I32Const(0), I32Select];
 
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
-		state.assert_transitions();
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -749,14 +732,19 @@ mod tests {
 			I32TeeLocal(0),
 		];
 
-		let constants = Constants::new(&ctx, 2, &[]);
+		let initial_locals = vec![
+			ctx.from_usize(1).int2bv(32),
+			ctx.from_usize(2).int2bv(32),
+			ctx.from_usize(0).int2bv(32),
+		];
+
+		let constants = Constants::new(&ctx, initial_locals, &[]);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 
 		solver.assert(&state.n_locals()._eq(&ctx.from_usize(3)));
 
-		state.assert_transitions();
-		constants.set_params(&solver, &[1, 2]);
+		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();

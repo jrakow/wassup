@@ -7,7 +7,7 @@ fn const0_add(c: &mut Criterion) {
 		b.iter(|| {
 			let source = &[I32Const(0), I32Add][..];
 
-			superoptimize_snippet(black_box(source), black_box(0))
+			superoptimize_snippet(black_box(source), black_box(&[]))
 		})
 	});
 }
@@ -17,7 +17,7 @@ fn consts_add(c: &mut Criterion) {
 		b.iter(|| {
 			let source = &[I32Const(1), I32Const(2), I32Add][..];
 
-			superoptimize_snippet(black_box(source), black_box(0))
+			superoptimize_snippet(black_box(source), black_box(&[]))
 		})
 	});
 }
@@ -27,7 +27,7 @@ fn const_nop(c: &mut Criterion) {
 		b.iter(|| {
 			let source = &[I32Const(1), Nop][..];
 
-			superoptimize_snippet(black_box(source), black_box(0))
+			superoptimize_snippet(black_box(source), black_box(&[]))
 		})
 	});
 }

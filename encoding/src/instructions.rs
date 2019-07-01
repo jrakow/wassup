@@ -438,7 +438,7 @@ mod tests {
 			Context::new(&cfg)
 		};
 		let solver = Solver::new(&ctx);
-		let constants = Constants::new(&ctx, 0, &[]);
+		let constants = Constants::new(&ctx, vec![], &[]);
 
 		assert!(solver.check());
 		let model = solver.get_model();

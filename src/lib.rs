@@ -40,7 +40,7 @@ pub fn superoptimize_func_body(
 	let mut function = Function::from_wasm_func_body_params(func_body, params);
 	for snippet in function.instructions.iter_mut() {
 		if let Either::Left(vec) = snippet {
-			let optimized = superoptimize_snippet(&vec, function.n_params);
+			let optimized = superoptimize_snippet(&vec, &function.local_types);
 			*vec = optimized;
 		}
 	}
@@ -48,20 +48,30 @@ pub fn superoptimize_func_body(
 	*func_body = function.to_wasm_func_body();
 }
 
-pub fn superoptimize_snippet(source_program: &[Instruction], n_params: usize) -> Vec<Instruction> {
+pub fn superoptimize_snippet(
+	source_program: &[Instruction],
+	local_types: &[ValueType],
+) -> Vec<Instruction> {
 	let config = Config::default();
 	let ctx = Context::new(&config);
 	let solver = Solver::new(&ctx);
 
 	// TODO compute actual stack types
 	let initial_stack = vec![ValueType::I32; stack_depth(&source_program[..])];
-	let constants = Constants::new(&ctx, n_params, &initial_stack);
+
+	let initial_locals: Vec<Ast> = local_types
+		.iter()
+		.map(|_ty| ctx.fresh_bitvector_const("initial_local", 32))
+		.collect();
+	let constants = Constants::new(&ctx, initial_locals.clone(), &initial_stack);
+	let initial_locals: Vec<&Ast> = initial_locals.iter().collect();
+
 	let source_state = State::new(&ctx, &solver, &constants, "source_");
 	let target_state = State::new(&ctx, &solver, &constants, "target_");
 	source_state.set_source_program(&source_program[..]);
 
-	source_state.assert_transitions();
-	target_state.assert_transitions();
+	solver.assert(&ctx.forall_const(&initial_locals, &source_state.transitions()));
+	solver.assert(&ctx.forall_const(&initial_locals, &target_state.transitions()));
 
 	let target_length = &target_state.program_length();
 
@@ -107,31 +117,30 @@ mod tests {
 	#[test]
 	fn superoptimize_nop() {
 		let source_program = &[I32Const(1), Nop];
-		let target = superoptimize_snippet(source_program, 0);
+		let target = superoptimize_snippet(source_program, &[]);
 		assert_eq!(target, vec![I32Const(1)]);
 	}
 
 	#[test]
 	fn superoptimize_consts_add() {
 		let source_program = &[I32Const(1), I32Const(2), I32Add];
-		let target = superoptimize_snippet(source_program, 0);
+		let target = superoptimize_snippet(source_program, &[]);
 		assert_eq!(target, vec![I32Const(3)]);
 	}
 
 	#[test]
 	fn superoptimize_add() {
 		let source_program = &[I32Const(0), I32Add];
-		let target = superoptimize_snippet(source_program, 0);
+		let target = superoptimize_snippet(source_program, &[]);
 		assert_eq!(target, vec![]);
 	}
 
 	#[test]
-	#[ignore]
 	fn no_superoptimize_setlocal() {
 		let source_program = &[I32Const(3), I32SetLocal(0)];
 
 		// no optimization possible, because locals cannot be changed
-		let target = superoptimize_snippet(source_program, 0);
+		let target = superoptimize_snippet(source_program, &[]);
 		assert_eq!(target, source_program);
 	}
 }

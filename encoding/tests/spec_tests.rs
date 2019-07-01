@@ -1,5 +1,5 @@
 use parity_wasm::elements::{Internal, Module, Type};
-use std::{collections::HashMap, fs::read};
+use std::{collections::HashMap, fs::read, iter::repeat};
 use wabt::script::{Action, Action::*, Command, CommandKind, ScriptParser, Value};
 use wassup_encoding::*;
 use z3::*;
@@ -67,14 +67,20 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 
 			let ctx = Context::new(&Config::default());
 			let solver = Solver::new(&ctx);
-			let constants = Constants::new(&ctx, params.len(), params);
+
+			// create values of initial locals: arguments then 0s for all other locals
+			let initial_locals = args
+				.iter()
+				.cloned()
+				.map(value_cast)
+				.chain(repeat(0).take(function.local_types.len() - function.n_params))
+				.map(|i| ctx.from_u32(i).int2bv(32))
+				.collect();
+			let constants = Constants::new(&ctx, initial_locals, params);
 			let state = State::new(&ctx, &solver, &constants, "");
 
-			// set initial values
-			let args: Vec<_> = args.iter().cloned().map(value_cast).collect();;
-			constants.set_params(&solver, &args);
 			state.set_source_program(&function.instructions[0].as_ref().left().unwrap());
-			state.assert_transitions();
+			solver.assert(&state.transitions());
 
 			assert!(solver.check());
 			let model = solver.get_model();

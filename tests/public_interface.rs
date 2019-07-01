@@ -1,7 +1,6 @@
 use parity_wasm::elements::{Instruction, Module};
 
 #[test]
-#[ignore]
 fn module_consts_add() {
 	let wasm_binary = wabt::Wat2Wasm::new()
 		.convert(
