@@ -10,4 +10,9 @@ parity-wasm = "0.38.0"
 z3 = { path = "../../z3.rs/z3" }
 
 [dev-dependencies]
+criterion = "0.2.11"
 wabt = "0.7.4"
+
+[[bench]]
+name = "transition"
+harness = false
