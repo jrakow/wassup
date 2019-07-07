@@ -62,6 +62,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			);
 		}
 
+		// TODO constrain stack_pointer - stack_pops >= 0
+
 		// constrain 0 <= local_index < n_locals
 		let pc = self.ctx.named_int_const("pc");
 		let instr = self.program(&pc);
