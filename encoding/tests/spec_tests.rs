@@ -14,6 +14,11 @@ fn test_i64() {
 	spec_test("i64.wast")
 }
 
+#[test]
+fn test_select() {
+	spec_test("select.wast")
+}
+
 fn spec_test(name: &str) {
 	let source = read("tests/spec_tests/".to_owned() + name).unwrap();
 
@@ -31,17 +36,17 @@ fn spec_test(name: &str) {
 				modules.insert(name, module);
 			}
 			CommandKind::AssertReturn { action, expected } => {
-				if let Invoke { field, .. } = &action {
-					if field == "clz" || field == "ctz" || field == "popcnt" {
-						// TODO
-						continue;
-					}
-				}
-
+				// ignore unencodable values
 				let expected: Vec<_> = expected.iter().cloned().map(value_cast).collect();
+				if expected.iter().any(Option::is_none) {
+					continue;
+				}
+				let expected: Vec<_> = expected.into_iter().map(Option::unwrap).collect();
 
-				let res = action_result(&modules, action);
-				assert_eq!(res, expected[0]);
+				// ignore unencodable functions
+				if let Some(res) = action_result(&modules, action) {
+					assert_eq!(res, expected);
+				}
 			}
 			CommandKind::AssertTrap { .. } => {} // TODO
 			_ => {}
@@ -49,7 +54,10 @@ fn spec_test(name: &str) {
 	}
 }
 
-fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, f64>) -> Value {
+fn action_result(
+	modules: &HashMap<Option<String>, Module>,
+	action: Action<f32, f64>,
+) -> Option<Vec<Value>> {
 	match action {
 		Invoke {
 			module: module_name,
@@ -68,6 +76,11 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 			let body = &module.code_section().unwrap().bodies()[func_index];
 			let function = Function::from_wasm_func_body_params(body, params);
 
+			// bail on functions with unencodable instructions
+			if function.instructions.len() > 2 || function.instructions[0].is_right() {
+				return None;
+			}
+
 			let instr = body.code().elements();
 			// slice of last End
 			let instr = &instr[..instr.len() - 1];
@@ -76,7 +89,12 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 			let solver = Solver::new(&ctx);
 
 			// create values of initial locals: arguments then 0s for all other locals
-			let args: Vec<_> = args.iter().cloned().map(value_cast).collect();
+			let args: Vec<_> = args
+				.iter()
+				.cloned()
+				.map(value_cast)
+				.map(Option::unwrap)
+				.collect();
 			let remaining_locals: Vec<_> = function.local_types[function.n_params..]
 				.iter()
 				.map(|ty| match ty {
@@ -91,7 +109,7 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 				.map(|v| v.encode(&ctx))
 				.collect();
 
-			let constants = Constants::new(&ctx, initial_locals, params);
+			let constants = Constants::new(&ctx, initial_locals, &[]);
 			let state = State::new(&ctx, &solver, &constants, "");
 
 			state.set_source_program(&function.instructions[0].as_ref().left().unwrap());
@@ -100,13 +118,22 @@ fn action_result(modules: &HashMap<Option<String>, Module>, action: Action<f32, 
 			assert!(solver.check());
 			let model = solver.get_model();
 
-			let pc = ctx.from_u64(instr.len() as u64);
-			let i = Value::decode(
-				&state.stack(&pc, &state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)])),
-				&ctx,
-				&model,
-			);
-			i
+			let pc = ctx.from_usize(instr.len());
+			let sp = model
+				.eval(&state.stack_pointer(&pc))
+				.unwrap()
+				.as_usize()
+				.unwrap();
+			if sp > 0 {
+				let i = Value::decode(
+					&state.stack(&pc, &state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)])),
+					&ctx,
+					&model,
+				);
+				Some(vec![i])
+			} else {
+				None
+			}
 		}
 		// TODO trapped tests
 		_ => panic!(),
@@ -128,10 +155,10 @@ fn get_function_index(module: &Module, name: &str) -> usize {
 	panic!("function not found");
 }
 
-fn value_cast(v: ScriptValue<f32, f64>) -> Value {
+fn value_cast(v: ScriptValue<f32, f64>) -> Option<Value> {
 	match v {
-		ScriptValue::I32(i) => wassup_encoding::Value::I32(i),
-		ScriptValue::I64(i) => wassup_encoding::Value::I64(i),
-		_ => unimplemented!(),
+		ScriptValue::I32(i) => Some(wassup_encoding::Value::I32(i)),
+		ScriptValue::I64(i) => Some(wassup_encoding::Value::I64(i)),
+		_ => None,
 	}
 }
