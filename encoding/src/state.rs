@@ -224,8 +224,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr
 				=> is_i64(&op1).and(&[&is_i64(&op2)]),
 
-				// TODO type(op2) == type(op3)
-				Select => is_i32(&op1),
+				Select => is_i32(&op1).and(&[&is_same_type(self.ctx, &op2, &op3)]),
 
 				_ => self.ctx.from_bool(true),
 			};
@@ -300,21 +299,26 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				}
 				SetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
+					let local = self.local(&pc, &index);
+					let local_next = self.local(&pc_next, &index);
+
 					let index_in_range = in_range(&zero, &index, &self.n_locals());
-					self.local(&pc_next, &index)
-						._eq(&op1)
-						.and(&[&index_in_range])
+					let local_same_type = is_same_type(self.ctx, &op1, &local);
+					let value_is_set = local_next._eq(&op1);
+
+					index_in_range.and(&[&local_same_type, &value_is_set])
 				}
 				TeeLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
+					let local = self.local(&pc, &index);
+					let local_next = self.local(&pc_next, &index);
 
 					let index_in_range = in_range(&zero, &index, &self.n_locals());
-					let local_set = self.local(&pc_next, &index)._eq(&op1);
+					let local_same_type = is_same_type(self.ctx, &op1, &local);
+					let value_is_set = local_next._eq(&op1);
 					let stack_set = result._eq(&op1);
 
-					self.ctx
-						.from_bool(true)
-						.and(&[&index_in_range, &local_set, &stack_set])
+					index_in_range.and(&[&local_same_type, &value_is_set, &stack_set])
 				}
 			};
 

@@ -137,6 +137,23 @@ pub fn value_type_to_index(v: &ValueType) -> usize {
 	}
 }
 
+pub fn is_same_type<'ctx>(ctx: &'ctx Context, lhs: &Ast<'ctx>, rhs: &Ast<'ctx>) -> Ast<'ctx> {
+	let value_type = value_type(ctx);
+
+	let conditions: Vec<_> = value_type
+		.variants
+		.iter()
+		.map(|v| {
+			let lhs_is_active_variant = v.tester.apply(&[&lhs]);
+			let rhs_is_active_variant = v.tester.apply(&[&rhs]);
+			lhs_is_active_variant.and(&[&rhs_is_active_variant])
+		})
+		.collect();
+	let conditions: Vec<&Ast> = conditions.iter().collect();
+
+	ctx.from_bool(false).or(&conditions)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -156,5 +173,37 @@ mod tests {
 
 		let program = &[Const(I32(1)), Const(I32(1)), Const(I32(1)), I32Add];
 		assert_eq!(stack_depth(program), 0);
+	}
+
+	#[test]
+	fn is_same_type_test() {
+		let ctx = Context::new(&Config::new());
+
+		let value_type = value_type(&ctx);
+		let i0 = value_type.variants[0]
+			.constructor
+			.apply(&[&ctx.from_u32(0).int2bv(32)]);
+		let i1 = value_type.variants[0]
+			.constructor
+			.apply(&[&ctx.from_u32(1).int2bv(32)]);
+		let i2 = value_type.variants[1]
+			.constructor
+			.apply(&[&ctx.from_u32(2).int2bv(64)]);
+
+		let solver = Solver::new(&ctx);
+		assert!(solver.check());
+		let model = solver.get_model();
+
+		let is_same_type = |lhs: &Ast, rhs: &Ast| -> bool {
+			model
+				.eval(&is_same_type(&ctx, lhs, rhs))
+				.unwrap()
+				.as_bool()
+				.unwrap()
+		};
+
+		assert!(is_same_type(&i0, &i1));
+		assert!(!is_same_type(&i1, &i2));
+		assert!(!is_same_type(&i0, &i2));
 	}
 }
