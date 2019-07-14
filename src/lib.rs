@@ -139,7 +139,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_nop() {
 		let source_program = &[Const(I32(1)), Nop];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
 		assert_eq!(target, vec![Const(I32(1))]);
 	}
 
@@ -147,7 +147,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_consts_add() {
 		let source_program = &[Const(I32(1)), Const(I32(2)), I32Add];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
 		assert_eq!(target, vec![Const(I32(3))]);
 	}
 
@@ -155,7 +155,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_consts_add_64bit() {
 		let source_program = &[Const(I64(1)), Const(I64(2)), I64Add];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
 		assert_eq!(target, vec![Const(I64(3))]);
 	}
 
@@ -163,7 +163,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_add() {
 		let source_program = &[Const(I32(0)), I32Add];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
 		assert_eq!(target, vec![]);
 	}
 
@@ -172,7 +172,7 @@ mod tests {
 		let source_program = &[Const(I32(3)), SetLocal(0)];
 
 		// no optimization possible, because locals cannot be changed
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
 		assert_eq!(target, source_program);
 	}
 
@@ -183,7 +183,7 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig::Mixed(32, 64),
+			ValueTypeConfig::Mixed(8, 16),
 		);
 		assert_eq!(target, vec![Unreachable]);
 	}
