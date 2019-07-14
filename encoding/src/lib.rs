@@ -78,12 +78,30 @@ pub enum Value {
 }
 
 impl Value {
-	pub fn encode<'ctx>(&self, ctx: &'ctx Context) -> Ast<'ctx> {
-		let datatype = value_type(ctx);
+	pub fn encode<'ctx>(
+		&self,
+		ctx: &'ctx Context,
+		value_type_config: ValueTypeConfig,
+	) -> Ast<'ctx> {
+		let datatype = value_type_config.value_type(ctx);
 
 		let (variant_index, encoded_value) = match self {
-			Value::I32(i) => (0, ctx.from_i32(*i).int2bv(32)),
-			Value::I64(i) => (1, ctx.from_i64(*i).int2bv(64)),
+			Value::I32(i) => {
+				let size = value_type_config.i32_size();
+				if size < 32 {
+					assert!((*i as u32) < 1 << size as u32);
+				}
+
+				(0, ctx.from_i32(*i).int2bv(size as u64))
+			}
+			Value::I64(i) => {
+				let size = value_type_config.i64_size();
+				if size < 64 {
+					assert!((*i as u64) < 1 << size as u64);
+				}
+
+				(1, ctx.from_i64(*i).int2bv(size as u64))
+			}
 			_ => unimplemented!(),
 		};
 
@@ -92,8 +110,13 @@ impl Value {
 			.apply(&[&encoded_value])
 	}
 
-	pub fn decode(v: &Ast, ctx: &Context, model: &Model) -> Self {
-		let dataype = value_type(ctx);
+	pub fn decode(
+		v: &Ast,
+		ctx: &Context,
+		model: &Model,
+		value_type_config: ValueTypeConfig,
+	) -> Self {
+		let dataype = value_type_config.value_type(ctx);
 
 		let index = dataype
 			.variants
@@ -121,37 +144,86 @@ impl Value {
 	}
 }
 
-/// Representation of a value in Z3
-pub fn value_type(ctx: &Context) -> Datatype {
-	DatatypeBuilder::new(ctx)
-		.variant("I32", &[("as_i32", &ctx.bitvector_sort(32))])
-		.variant("I64", &[("as_i64", &ctx.bitvector_sort(64))])
-		.finish("Value")
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How to represent a value type
+///
+/// I32 is always needed, so there is no 64 bit only
+pub enum ValueTypeConfig {
+	/// Enable only I32 variant
+	OnlyI32,
+	/// Enable both variants with the given sizes
+	Mixed(usize, usize),
 }
 
-pub fn value_type_to_index(v: &ValueType) -> usize {
-	match v {
-		ValueType::I32 => 0,
-		ValueType::I64 => 1,
-		_ => unimplemented!(),
+impl ValueTypeConfig {
+	/// Representation of a value in Z3
+	pub fn value_type<'ctx>(&self, ctx: &'ctx Context) -> Datatype<'ctx> {
+		let mut builder = DatatypeBuilder::new(ctx).variant(
+			"I32",
+			&[("as_i32", &ctx.bitvector_sort(self.i32_size() as u32))],
+		);
+
+		if self.i64_enabled() {
+			builder = builder.variant(
+				"I64",
+				&[("as_i64", &ctx.bitvector_sort(self.i64_size() as u32))],
+			)
+		}
+
+		builder.finish("Value")
 	}
-}
 
-pub fn is_same_type<'ctx>(ctx: &'ctx Context, lhs: &Ast<'ctx>, rhs: &Ast<'ctx>) -> Ast<'ctx> {
-	let value_type = value_type(ctx);
+	pub fn value_type_to_index(&self, v: &ValueType) -> usize {
+		match v {
+			ValueType::I32 => 0,
+			ValueType::I64 if self.i64_enabled() => 1,
+			ValueType::I64 => unreachable!(),
+			_ => unimplemented!(),
+		}
+	}
 
-	let conditions: Vec<_> = value_type
-		.variants
-		.iter()
-		.map(|v| {
-			let lhs_is_active_variant = v.tester.apply(&[&lhs]);
-			let rhs_is_active_variant = v.tester.apply(&[&rhs]);
-			lhs_is_active_variant.and(&[&rhs_is_active_variant])
-		})
-		.collect();
-	let conditions: Vec<&Ast> = conditions.iter().collect();
+	pub fn is_same_type<'ctx>(
+		&self,
+		ctx: &'ctx Context,
+		lhs: &Ast<'ctx>,
+		rhs: &Ast<'ctx>,
+	) -> Ast<'ctx> {
+		let value_type = self.value_type(ctx);
 
-	ctx.from_bool(false).or(&conditions)
+		let conditions: Vec<_> = value_type
+			.variants
+			.iter()
+			.map(|v| {
+				let lhs_is_active_variant = v.tester.apply(&[&lhs]);
+				let rhs_is_active_variant = v.tester.apply(&[&rhs]);
+				lhs_is_active_variant.and(&[&rhs_is_active_variant])
+			})
+			.collect();
+		let conditions: Vec<&Ast> = conditions.iter().collect();
+
+		ctx.from_bool(false).or(&conditions)
+	}
+
+	pub fn i64_enabled(&self) -> bool {
+		match *self {
+			ValueTypeConfig::OnlyI32 => false,
+			ValueTypeConfig::Mixed(..) => true,
+		}
+	}
+
+	pub fn i32_size(&self) -> usize {
+		match *self {
+			ValueTypeConfig::OnlyI32 => 32,
+			ValueTypeConfig::Mixed(i, _) => i,
+		}
+	}
+
+	pub fn i64_size(&self) -> usize {
+		match *self {
+			ValueTypeConfig::OnlyI32 => unreachable!(),
+			ValueTypeConfig::Mixed(_, i) => i,
+		}
+	}
 }
 
 #[cfg(test)]
@@ -178,8 +250,9 @@ mod tests {
 	#[test]
 	fn is_same_type_test() {
 		let ctx = Context::new(&Config::new());
+		let value_type_config = ValueTypeConfig::Mixed(32, 64);
 
-		let value_type = value_type(&ctx);
+		let value_type = value_type_config.value_type(&ctx);
 		let i0 = value_type.variants[0]
 			.constructor
 			.apply(&[&ctx.from_u32(0).int2bv(32)]);
@@ -196,7 +269,7 @@ mod tests {
 
 		let is_same_type = |lhs: &Ast, rhs: &Ast| -> bool {
 			model
-				.eval(&is_same_type(&ctx, lhs, rhs))
+				.eval(&value_type_config.is_same_type(&ctx, lhs, rhs))
 				.unwrap()
 				.as_bool()
 				.unwrap()

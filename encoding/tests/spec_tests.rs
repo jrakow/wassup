@@ -87,6 +87,7 @@ fn action_result(
 
 			let ctx = Context::new(&Config::default());
 			let solver = Solver::new(&ctx);
+			let value_type_config = ValueTypeConfig::Mixed(32, 64);
 
 			// create values of initial locals: arguments then 0s for all other locals
 			let args: Vec<_> = args
@@ -106,10 +107,10 @@ fn action_result(
 			let initial_locals = args
 				.iter()
 				.chain(remaining_locals.iter())
-				.map(|v| v.encode(&ctx))
+				.map(|v| v.encode(&ctx, value_type_config))
 				.collect();
 
-			let constants = Constants::new(&ctx, initial_locals, &[]);
+			let constants = Constants::new(&ctx, initial_locals, &[], value_type_config);
 			let state = State::new(&ctx, &solver, &constants, "");
 
 			state.set_source_program(&function.instructions[0].as_ref().left().unwrap());
@@ -129,6 +130,7 @@ fn action_result(
 					&state.stack(&pc, &state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)])),
 					&ctx,
 					&model,
+					value_type_config,
 				);
 				Some(vec![i])
 			} else {

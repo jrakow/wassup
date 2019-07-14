@@ -1,4 +1,4 @@
-use crate::{value_type, Value};
+use crate::{Value, ValueTypeConfig};
 use parity_wasm::elements::Instruction as PInstruction;
 use z3::*;
 
@@ -295,9 +295,10 @@ impl Instruction {
 		}
 	}
 
-	pub fn iter_templates() -> impl Iterator<Item = Instruction> {
+	pub fn iter_templates(value_type_config: ValueTypeConfig) -> impl Iterator<Item = Instruction> {
 		use Instruction::*;
-		[
+
+		let either = &[
 			Unreachable,
 			Nop,
 			Drop,
@@ -306,61 +307,24 @@ impl Instruction {
 			SetLocal(0),
 			TeeLocal(0),
 			Const(Value::I32(0)),
-			I32Eqz,
-			I32Eq,
-			I32Ne,
-			I32LtS,
-			I32LtU,
-			I32GtS,
-			I32GtU,
-			I32LeS,
-			I32LeU,
-			I32GeS,
-			I32GeU,
-			I64Eqz,
-			I64Eq,
-			I64Ne,
-			I64LtS,
-			I64LtU,
-			I64GtS,
-			I64GtU,
-			I64LeS,
-			I64LeU,
-			I64GeS,
-			I64GeU,
-			I32Add,
-			I32Sub,
-			I32Mul,
-			I32DivS,
-			I32DivU,
-			I32RemS,
-			I32RemU,
-			I32And,
-			I32Or,
-			I32Xor,
-			I32Shl,
-			I32ShrS,
-			I32ShrU,
-			I32Rotl,
-			I32Rotr,
-			I64Add,
-			I64Sub,
-			I64Mul,
-			I64DivS,
-			I64DivU,
-			I64RemS,
-			I64RemU,
-			I64And,
-			I64Or,
-			I64Xor,
-			I64Shl,
-			I64ShrS,
-			I64ShrU,
-			I64Rotl,
-			I64Rotr,
-		]
-		.iter()
-		.cloned()
+		];
+		let i_32 = &[
+			I32Eqz, I32Eq, I32Ne, I32LtS, I32LtU, I32GtS, I32GtU, I32LeS, I32LeU, I32GeS, I32GeU,
+			I32Add, I32Sub, I32Mul, I32DivS, I32DivU, I32RemS, I32RemU, I32And, I32Or, I32Xor,
+			I32Shl, I32ShrS, I32ShrU, I32Rotl, I32Rotr,
+		][..];
+
+		let i_64 = if value_type_config.i64_enabled() {
+			&[
+				I64Eqz, I64Eq, I64Ne, I64LtS, I64LtU, I64GtS, I64GtU, I64LeS, I64LeU, I64GeS,
+				I64GeU, I64Add, I64Sub, I64Mul, I64DivS, I64DivU, I64RemS, I64RemU, I64And, I64Or,
+				I64Xor, I64Shl, I64ShrS, I64ShrU, I64Rotl, I64Rotr,
+			][..]
+		} else {
+			&[]
+		};
+
+		either.iter().chain(i_32.iter()).chain(i_64.iter()).cloned()
 	}
 
 	pub fn template_eq(&self, other: &Self) -> bool {
@@ -369,36 +333,49 @@ impl Instruction {
 		discriminant(self) == discriminant(other)
 	}
 
-	pub fn as_usize(&self) -> usize {
-		Self::iter_templates()
+	pub fn as_usize(&self, value_type_config: ValueTypeConfig) -> usize {
+		Self::iter_templates(value_type_config)
 			.position(|i| i.template_eq(self))
 			.unwrap()
 	}
 
-	pub fn encode<'ctx>(&self, ctx: &'ctx Context) -> Ast<'ctx> {
+	pub fn encode<'ctx>(
+		&self,
+		ctx: &'ctx Context,
+		value_type_config: ValueTypeConfig,
+	) -> Ast<'ctx> {
 		use Instruction::*;
 
-		let constructor = &instruction_datatype(ctx).variants[self.as_usize()].constructor;
+		let constructor = &instruction_datatype(ctx, value_type_config).variants
+			[self.as_usize(value_type_config)]
+		.constructor;
 		match self {
-			Const(i) => constructor.apply(&[&i.encode(ctx)]),
+			Const(i) => constructor.apply(&[&i.encode(ctx, value_type_config)]),
 			GetLocal(i) | SetLocal(i) | TeeLocal(i) => constructor.apply(&[&ctx.from_u32(*i)]),
 			_ => constructor.apply(&[]),
 		}
 	}
 
-	pub fn decode(encoded_instr: &Ast, ctx: &Context, model: &Model) -> Self {
+	pub fn decode(
+		encoded_instr: &Ast,
+		ctx: &Context,
+		model: &Model,
+		value_type_config: ValueTypeConfig,
+	) -> Self {
 		use Instruction::*;
 
-		Instruction::iter_templates()
+		Instruction::iter_templates(value_type_config)
 			.find_map(|template| {
-				let variant = &instruction_datatype(ctx).variants[template.as_usize()];
+				let variant = &instruction_datatype(ctx, value_type_config).variants
+					[template.as_usize(value_type_config)];
 
 				let active = variant.tester.apply(&[&encoded_instr]);
 				if model.eval(&active).unwrap().as_bool().unwrap() {
 					Some(match template {
 						Const(_) => {
 							let encoded_value = variant.accessors[0].apply(&[&encoded_instr]);
-							let value = Value::decode(&encoded_value, ctx, model);
+							let value =
+								Value::decode(&encoded_value, ctx, model, value_type_config);
 
 							Const(value)
 						}
@@ -508,11 +485,14 @@ impl From<Instruction> for PInstruction {
 /// Datatype for instructions in Z3
 ///
 /// Instructions are indexed according to their enum discriminant.
-pub fn instruction_datatype(ctx: &Context) -> Datatype {
+pub fn instruction_datatype<'ctx>(
+	ctx: &'ctx Context,
+	value_type_config: ValueTypeConfig,
+) -> Datatype<'ctx> {
 	let mut datatype = DatatypeBuilder::new(ctx);
-	let value_sort = value_type(ctx).sort;
+	let value_sort = value_type_config.value_type(ctx).sort;
 
-	for i in Instruction::iter_templates() {
+	for i in Instruction::iter_templates(value_type_config) {
 		datatype = match i {
 			Instruction::Const(_) => datatype.variant("Const", &[("value", &value_sort)]),
 			Instruction::GetLocal(_) => {
@@ -560,7 +540,8 @@ mod tests {
 			Context::new(&cfg)
 		};
 		let solver = Solver::new(&ctx);
-		let constants = Constants::new(&ctx, vec![], &[]);
+		let value_type_config = ValueTypeConfig::Mixed(32, 64);
+		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
 
 		assert!(solver.check());
 		let model = solver.get_model();
@@ -570,26 +551,38 @@ mod tests {
 			ast.as_usize().unwrap()
 		};
 
-		for i in Instruction::iter_templates() {
+		for i in Instruction::iter_templates(value_type_config) {
 			let (pops, pushs) = i.stack_pop_push_count();
-			assert_eq!(eval(&constants.stack_pop_count(&i.encode(&ctx))), pops);
-			assert_eq!(eval(&constants.stack_push_count(&i.encode(&ctx))), pushs);
+			assert_eq!(
+				eval(&constants.stack_pop_count(&i.encode(&ctx, value_type_config))),
+				pops
+			);
+			assert_eq!(
+				eval(&constants.stack_push_count(&i.encode(&ctx, value_type_config))),
+				pushs
+			);
 		}
 
 		assert_eq!(
-			eval(&constants.stack_pop_count(&Instruction::I32Add.encode(&ctx))),
+			eval(&constants.stack_pop_count(&Instruction::I32Add.encode(&ctx, value_type_config))),
 			2
 		);
 		assert_eq!(
-			eval(&constants.stack_push_count(&Instruction::I32Add.encode(&ctx))),
+			eval(&constants.stack_push_count(&Instruction::I32Add.encode(&ctx, value_type_config))),
 			1
 		);
 		assert_eq!(
-			eval(&constants.stack_pop_count(&Instruction::Const(I32(0)).encode(&ctx))),
+			eval(
+				&constants
+					.stack_pop_count(&Instruction::Const(I32(0)).encode(&ctx, value_type_config))
+			),
 			0
 		);
 		assert_eq!(
-			eval(&constants.stack_push_count(&Instruction::Const(I32(0)).encode(&ctx))),
+			eval(
+				&constants
+					.stack_push_count(&Instruction::Const(I32(0)).encode(&ctx, value_type_config))
+			),
 			1
 		);
 	}

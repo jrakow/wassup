@@ -40,7 +40,8 @@ pub fn superoptimize_func_body(
 	let mut function = Function::from_wasm_func_body_params(func_body, params);
 	for snippet in function.instructions.iter_mut() {
 		if let Either::Left(vec) = snippet {
-			let optimized = superoptimize_snippet(&vec, &function.local_types);
+			let optimized =
+				superoptimize_snippet(&vec, &function.local_types, ValueTypeConfig::Mixed(32, 64));
 			*vec = optimized;
 		}
 	}
@@ -51,6 +52,7 @@ pub fn superoptimize_func_body(
 pub fn superoptimize_snippet(
 	source_program: &[Instruction],
 	local_types: &[ValueType],
+	value_type_config: ValueTypeConfig,
 ) -> Vec<Instruction> {
 	let config = Config::default();
 	let ctx = Context::new(&config);
@@ -61,7 +63,7 @@ pub fn superoptimize_snippet(
 
 	let mut initial_locals = Vec::new();
 	let mut initial_locals_bounds = Vec::new();
-	let datatype = value_type(&ctx);
+	let datatype = value_type_config.value_type(&ctx);
 	for ty in local_types {
 		let sort = match ty {
 			ValueType::I32 => ctx.bitvector_sort(32),
@@ -71,13 +73,13 @@ pub fn superoptimize_snippet(
 		let inner = ctx.fresh_const("initial_local", &sort);
 		initial_locals_bounds.push(inner.clone());
 
-		let value = datatype.variants[value_type_to_index(ty)]
+		let value = datatype.variants[value_type_config.value_type_to_index(ty)]
 			.constructor
 			.apply(&[&inner]);
 		initial_locals.push(value);
 	}
 
-	let constants = Constants::new(&ctx, initial_locals, &initial_stack);
+	let constants = Constants::new(&ctx, initial_locals, &initial_stack, value_type_config);
 
 	let source_state = State::new(&ctx, &solver, &constants, "source_");
 	let target_state = State::new(&ctx, &solver, &constants, "target_");
@@ -137,7 +139,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_nop() {
 		let source_program = &[Const(I32(1)), Nop];
-		let target = superoptimize_snippet(source_program, &[]);
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
 		assert_eq!(target, vec![Const(I32(1))]);
 	}
 
@@ -145,7 +147,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_consts_add() {
 		let source_program = &[Const(I32(1)), Const(I32(2)), I32Add];
-		let target = superoptimize_snippet(source_program, &[]);
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
 		assert_eq!(target, vec![Const(I32(3))]);
 	}
 
@@ -153,7 +155,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_consts_add_64bit() {
 		let source_program = &[Const(I64(1)), Const(I64(2)), I64Add];
-		let target = superoptimize_snippet(source_program, &[]);
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
 		assert_eq!(target, vec![Const(I64(3))]);
 	}
 
@@ -161,7 +163,7 @@ mod tests {
 	#[ignore]
 	fn superoptimize_add() {
 		let source_program = &[Const(I32(0)), I32Add];
-		let target = superoptimize_snippet(source_program, &[]);
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
 		assert_eq!(target, vec![]);
 	}
 
@@ -170,7 +172,7 @@ mod tests {
 		let source_program = &[Const(I32(3)), SetLocal(0)];
 
 		// no optimization possible, because locals cannot be changed
-		let target = superoptimize_snippet(source_program, &[]);
+		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(32, 64));
 		assert_eq!(target, source_program);
 	}
 
@@ -178,7 +180,11 @@ mod tests {
 	#[ignore] // TODO
 	fn superoptimize_unreachable_garbage() {
 		let source_program = &[Unreachable, GetLocal(0)];
-		let target = superoptimize_snippet(source_program, &[ValueType::I32]);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			ValueTypeConfig::Mixed(32, 64),
+		);
 		assert_eq!(target, vec![Unreachable]);
 	}
 }

@@ -6,7 +6,8 @@ fn transition_consts_add(source: &[Instruction]) {
 	let ctx = Context::new(&Config::default());
 	let solver = Solver::new(&ctx);
 
-	let constants = Constants::new(&ctx, vec![], &[]);
+	let value_type_config = ValueTypeConfig::Mixed(32, 64);
+	let constants = Constants::new(&ctx, vec![], &[], value_type_config);
 	let state = State::new(&ctx, &solver, &constants, "");
 
 	state.set_source_program(source);
@@ -16,7 +17,7 @@ fn transition_consts_add(source: &[Instruction]) {
 	assert!(solver.check());
 	let model = solver.get_model();
 
-	let value_type = value_type(&ctx);
+	let value_type = value_type_config.value_type(&ctx);
 	let stack = |pc, i| -> i32 {
 		let pc = &ctx.from_usize(pc);
 		let i = &ctx.from_usize(i);
