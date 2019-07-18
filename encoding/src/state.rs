@@ -49,10 +49,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				._eq(&self.ctx.from_usize(self.constants.initial_stack.len())),
 		);
 
-		// set n_locals = initial_locals.len()
-		let n_locals = self.ctx.from_usize(self.constants.initial_locals.len());
-		self.solver.assert(&self.n_locals()._eq(&n_locals));
-
 		// set local(0, i) = inital_locals[i]
 		for (i, var) in self.constants.initial_locals.iter().enumerate() {
 			self.solver.assert(
@@ -78,7 +74,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			let active = variant.tester.apply(&[&instr]);
 			let index = variant.accessors[0].apply(&[&instr]);
 
-			let index_in_range = in_range(&self.ctx.from_usize(0), &index, &self.n_locals());
+			let index_in_range =
+				in_range(&self.ctx.from_usize(0), &index, &self.constants.n_locals);
 
 			conditions.push(active.implies(&index_in_range));
 		}
@@ -153,7 +150,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&self.preserve_locals(&pc),
 			&self.transition_stack_pointer(&pc),
 			&self.transition_stack(&pc),
-			&self.transition_trapped(&pc),
+			// TODO
+			//			&self.transition_trapped(&pc),
 		])
 	}
 
@@ -177,16 +175,15 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let instruction_datatype = instruction_datatype(self.ctx, self.constants.value_type_config);
 		let instr = self.program(&pc);
 
-		// ad-hoc conversions
-		let value_type = self.constants.value_type_config.value_type(self.ctx);
+		let to_i32 = |i: &Ast<'ctx>| {
+			self.constants
+				.value_type_config
+				.i32_wrap_as_i64(self.ctx, i)
+		};
+		let as_i32 = |i: &Ast<'ctx>| self.constants.value_type_config.i64_unwrap_as_i32(i);
 
-		let is_i32 = |op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].tester.apply(&[op]) };
-		let to_i32 =
-			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].constructor.apply(&[&op]) };
-		let as_i32 =
-			|op: &Ast<'ctx>| -> Ast<'ctx> { value_type.variants[0].accessors[0].apply(&[&op]) };
-		let i32_size = self.constants.value_type_config.i32_size();
-
+		// helpers
+		let i32_size = self.constants.value_type_config.i32_size;
 		let bool_to_i32 = |b: &Ast<'ctx>| {
 			to_i32(
 				&b.ite(&self.ctx.from_usize(1), &self.ctx.from_usize(0))
@@ -195,63 +192,38 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		};
 		let bvmod32 =
 			|b: &Ast<'ctx>| b.bvurem(&self.ctx.from_usize(i32_size).int2bv(i32_size as u64));
-
-		// The I64 variants panic in I32-only mode
-		let is_i64 = |op: &Ast<'ctx>| -> Ast<'ctx> {
-			if self.constants.value_type_config.i64_enabled() {
-				value_type.variants[1].tester.apply(&[op])
-			} else {
-				panic!()
-			}
-		};
-		let as_i64 = |op: &Ast<'ctx>| -> Ast<'ctx> {
-			if self.constants.value_type_config.i64_enabled() {
-				value_type.variants[1].accessors[0].apply(&[&op])
-			} else {
-				panic!()
-			}
-		};
-		let to_i64 = |op: &Ast<'ctx>| -> Ast<'ctx> {
-			if self.constants.value_type_config.i64_enabled() {
-				value_type.variants[1].constructor.apply(&[&op])
-			} else {
-				panic!()
-			}
-		};
-		let i64_size = || {
-			if self.constants.value_type_config.i64_enabled() {
-				self.constants.value_type_config.i64_size()
-			} else {
-				panic!()
-			}
-		};
 		let bvmod64 = |b: &Ast<'ctx>| {
-			if self.constants.value_type_config.i64_enabled() {
-				b.bvurem(&self.ctx.from_usize(i64_size()).int2bv(i64_size() as u64))
-			} else {
-				panic!();
-			}
+			let i64_size = self.constants.value_type_config.i64_size.unwrap();
+			b.bvurem(&self.ctx.from_usize(i64_size).int2bv(i64_size as u64))
 		};
 		let bv64_zero = || {
-			if self.constants.value_type_config.i64_enabled() {
-				self.ctx.from_usize(0).int2bv(i64_size() as u64)
-			} else {
-				panic!();
-			}
+			let i64_size = self.constants.value_type_config.i64_size.unwrap();
+			self.ctx.from_usize(0).int2bv(i64_size as u64)
 		};
 
-		// constants
-		let zero = self.ctx.from_usize(0);
 		let bv32_zero = self.ctx.from_usize(0).int2bv(i32_size as u64);
 		let pc_next = &pc.add(&[&self.ctx.from_usize(1)]);
 
-		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
-		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
-		let op3 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(3)]));
+		let op = |i| self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(i)]));
+		let op_type =
+			|i| self.stack_type(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(i)]));
 		let result = self.stack(
 			pc_next,
 			&self.stack_pointer(&pc_next).sub(&[&self.ctx.from_i64(1)]),
 		);
+		let result_type = self.stack_type(
+			pc_next,
+			&self.stack_pointer(&pc_next).sub(&[&self.ctx.from_i64(1)]),
+		);
+		let i32_type = self
+			.constants
+			.value_type_config
+			.encode_value_type(self.ctx, ValueType::I32);
+		let i64_type = || {
+			self.constants
+				.value_type_config
+				.encode_value_type(self.ctx, ValueType::I64)
+		};
 
 		let mut transitions = Vec::new();
 		for (i, variant) in instruction_datatype.variants.iter().enumerate() {
@@ -260,126 +232,164 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				.nth(i)
 				.unwrap();
 
-			let correct_type = match template {
-				I32Eqz => is_i32(&op1),
+			let operand_types_correct = match template {
+				I32Eqz => op_type(1)._eq(&i32_type),
 				// irelop
 				I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU |
 				// ibinop
 				I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr
-				=> is_i32(&op1).and(&[&is_i32(&op2)]),
+				=> op_type(1)._eq(&i32_type).and(&[&op_type(2)._eq(&i32_type)]),
 
-				I64Eqz => is_i64(&op1),
+				I64Eqz => op_type(1)._eq(&i64_type()),
 				// irelop
 				I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS | I64GeU |
 				// ibinop
 				I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr
-				=> is_i64(&op1).and(&[&is_i64(&op2)]),
+				=> op_type(1)._eq(&i64_type()).and(&[&op_type(2)._eq(&i64_type())]),
 
-				Select => is_i32(&op1).and(&[&self.constants.value_type_config.is_same_type(self.ctx, &op2, &op3)]),
+				Select => op_type(1)._eq(&i32_type).and(&[&op_type(2)._eq(&op_type(3))]),
+				SetLocal(_) | TeeLocal(_) => {
+					let index = variant.accessors[0].apply(&[&instr]);
+					let ty = self.constants.local_type(&index);
+					op_type(1)._eq(&ty)
+				}
 
 				_ => self.ctx.from_bool(true),
 			};
+
+			let result_type_correct = match template {
+				I32Eqz | I64Eqz |
+				// irelop 32
+				I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU |
+				// irelop 64
+				I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS | I64GeU |
+				// ibinop 32
+				I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr
+				=> result_type._eq(&i32_type),
+
+				// ibinop
+				I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr
+				=> result_type._eq(&i64_type()),
+
+				Select => result_type._eq(&op_type(2)),
+				Const(_) => result_type._eq(&variant.accessors[1].apply(&[&instr])),
+				GetLocal(_) | TeeLocal(_) => {
+					let index = variant.accessors[0].apply(&[&instr]);
+					let ty = self.constants.local_type(&index);
+					result_type._eq(&ty)
+				}
+
+				_ => self.ctx.from_bool(true),
+			};
+
+			let next_trapped = match template {
+				Unreachable => self.ctx.from_bool(true),
+
+				I32DivU | I32RemU | I32RemS => as_i32(&op(2))._eq(&bv32_zero),
+				I32DivS => {
+					let divide_by_zero = as_i32(&op(2))._eq(&bv32_zero);
+					let overflow = as_i32(&op(2)).bvsdiv_no_overflow(&as_i32(&op(1)));
+					divide_by_zero.or(&[&overflow])
+				}
+				I64DivU | I64RemU | I64RemS => op(2)._eq(&bv64_zero()),
+				I64DivS => {
+					let divide_by_zero = op(2)._eq(&bv64_zero());
+					let overflow = &op(2).bvsdiv_no_overflow(&op(1));
+					divide_by_zero.or(&[&overflow])
+				}
+				_ => self.ctx.from_bool(false),
+			};
+			let next_trapped = self.trapped(&pc).or(&[&next_trapped]);
+			let trapped_transition = self.trapped(pc_next)._eq(&next_trapped);
 
 			let transition = match template {
 				Unreachable | Nop | Drop => self.ctx.from_bool(true),
 
 				Const(_) => result._eq(&variant.accessors[0].apply(&[&instr])),
 
-				I32Eqz => result._eq(&bool_to_i32(&as_i32(&op1)._eq(&bv32_zero))),
-				I32Eq => result._eq(&bool_to_i32(&as_i32(&op2)._eq(&as_i32(&op1)))),
-				I32Ne => result._eq(&bool_to_i32(&as_i32(&op2)._eq(&as_i32(&op1)).not())),
-				I32LtS => result._eq(&bool_to_i32(&as_i32(&op2).bvslt(&as_i32(&op1)))),
-				I32LtU => result._eq(&bool_to_i32(&as_i32(&op2).bvult(&as_i32(&op1)))),
-				I32GtS => result._eq(&bool_to_i32(&as_i32(&op2).bvsgt(&as_i32(&op1)))),
-				I32GtU => result._eq(&bool_to_i32(&as_i32(&op2).bvugt(&as_i32(&op1)))),
-				I32LeS => result._eq(&bool_to_i32(&as_i32(&op2).bvsle(&as_i32(&op1)))),
-				I32LeU => result._eq(&bool_to_i32(&as_i32(&op2).bvule(&as_i32(&op1)))),
-				I32GeS => result._eq(&bool_to_i32(&as_i32(&op2).bvsge(&as_i32(&op1)))),
-				I32GeU => result._eq(&bool_to_i32(&as_i32(&op2).bvuge(&as_i32(&op1)))),
+				I32Eqz => result._eq(&bool_to_i32(&as_i32(&op(1))._eq(&bv32_zero))),
+				I32Eq => result._eq(&bool_to_i32(&as_i32(&op(2))._eq(&as_i32(&op(1))))),
+				I32Ne => result._eq(&bool_to_i32(&as_i32(&op(2))._eq(&as_i32(&op(1))).not())),
+				I32LtS => result._eq(&bool_to_i32(&as_i32(&op(2)).bvslt(&as_i32(&op(1))))),
+				I32LtU => result._eq(&bool_to_i32(&as_i32(&op(2)).bvult(&as_i32(&op(1))))),
+				I32GtS => result._eq(&bool_to_i32(&as_i32(&op(2)).bvsgt(&as_i32(&op(1))))),
+				I32GtU => result._eq(&bool_to_i32(&as_i32(&op(2)).bvugt(&as_i32(&op(1))))),
+				I32LeS => result._eq(&bool_to_i32(&as_i32(&op(2)).bvsle(&as_i32(&op(1))))),
+				I32LeU => result._eq(&bool_to_i32(&as_i32(&op(2)).bvule(&as_i32(&op(1))))),
+				I32GeS => result._eq(&bool_to_i32(&as_i32(&op(2)).bvsge(&as_i32(&op(1))))),
+				I32GeU => result._eq(&bool_to_i32(&as_i32(&op(2)).bvuge(&as_i32(&op(1))))),
 
-				I64Eqz => result._eq(&bool_to_i32(&as_i64(&op1)._eq(&bv64_zero()))),
-				I64Eq => result._eq(&bool_to_i32(&as_i64(&op2)._eq(&as_i64(&op1)))),
-				I64Ne => result._eq(&bool_to_i32(&as_i64(&op2)._eq(&as_i64(&op1)).not())),
-				I64LtS => result._eq(&bool_to_i32(&as_i64(&op2).bvslt(&as_i64(&op1)))),
-				I64LtU => result._eq(&bool_to_i32(&as_i64(&op2).bvult(&as_i64(&op1)))),
-				I64GtS => result._eq(&bool_to_i32(&as_i64(&op2).bvsgt(&as_i64(&op1)))),
-				I64GtU => result._eq(&bool_to_i32(&as_i64(&op2).bvugt(&as_i64(&op1)))),
-				I64LeS => result._eq(&bool_to_i32(&as_i64(&op2).bvsle(&as_i64(&op1)))),
-				I64LeU => result._eq(&bool_to_i32(&as_i64(&op2).bvule(&as_i64(&op1)))),
-				I64GeS => result._eq(&bool_to_i32(&as_i64(&op2).bvsge(&as_i64(&op1)))),
-				I64GeU => result._eq(&bool_to_i32(&as_i64(&op2).bvuge(&as_i64(&op1)))),
+				I64Eqz => result._eq(&bool_to_i32(&op(1)._eq(&bv64_zero()))),
+				I64Eq => result._eq(&bool_to_i32(&op(2)._eq(&op(1)))),
+				I64Ne => result._eq(&bool_to_i32(&op(2)._eq(&op(1)).not())),
+				I64LtS => result._eq(&bool_to_i32(&op(2).bvslt(&op(1)))),
+				I64LtU => result._eq(&bool_to_i32(&op(2).bvult(&op(1)))),
+				I64GtS => result._eq(&bool_to_i32(&op(2).bvsgt(&op(1)))),
+				I64GtU => result._eq(&bool_to_i32(&op(2).bvugt(&op(1)))),
+				I64LeS => result._eq(&bool_to_i32(&op(2).bvsle(&op(1)))),
+				I64LeU => result._eq(&bool_to_i32(&op(2).bvule(&op(1)))),
+				I64GeS => result._eq(&bool_to_i32(&op(2).bvsge(&op(1)))),
+				I64GeU => result._eq(&bool_to_i32(&op(2).bvuge(&op(1)))),
 
-				I32Add => result._eq(&to_i32(&as_i32(&op2).bvadd(&as_i32(&op1)))),
-				I32Sub => result._eq(&to_i32(&as_i32(&op2).bvsub(&as_i32(&op1)))),
-				I32Mul => result._eq(&to_i32(&as_i32(&op2).bvmul(&as_i32(&op1)))),
-				I32DivS => result._eq(&to_i32(&as_i32(&op2).bvsdiv(&as_i32(&op1)))),
-				I32DivU => result._eq(&to_i32(&as_i32(&op2).bvudiv(&as_i32(&op1)))),
-				I32RemS => result._eq(&to_i32(&as_i32(&op2).bvsrem(&as_i32(&op1)))),
-				I32RemU => result._eq(&to_i32(&as_i32(&op2).bvurem(&as_i32(&op1)))),
-				I32And => result._eq(&to_i32(&as_i32(&op2).bvand(&as_i32(&op1)))),
-				I32Or => result._eq(&to_i32(&as_i32(&op2).bvor(&as_i32(&op1)))),
-				I32Xor => result._eq(&to_i32(&as_i32(&op2).bvxor(&as_i32(&op1)))),
-				I32Shl => result._eq(&to_i32(&as_i32(&op2).bvshl(&bvmod32(&as_i32(&op1))))),
-				I32ShrS => result._eq(&to_i32(&as_i32(&op2).bvashr(&bvmod32(&as_i32(&op1))))),
-				I32ShrU => result._eq(&to_i32(&as_i32(&op2).bvlshr(&bvmod32(&as_i32(&op1))))),
-				I32Rotl => result._eq(&to_i32(&as_i32(&op2).bvrotl(&bvmod32(&as_i32(&op1))))),
-				I32Rotr => result._eq(&to_i32(&as_i32(&op2).bvrotr(&bvmod32(&as_i32(&op1))))),
+				I32Add => result._eq(&to_i32(&as_i32(&op(2)).bvadd(&as_i32(&op(1))))),
+				I32Sub => result._eq(&to_i32(&as_i32(&op(2)).bvsub(&as_i32(&op(1))))),
+				I32Mul => result._eq(&to_i32(&as_i32(&op(2)).bvmul(&as_i32(&op(1))))),
+				I32DivS => result._eq(&to_i32(&as_i32(&op(2)).bvsdiv(&as_i32(&op(1))))),
+				I32DivU => result._eq(&to_i32(&as_i32(&op(2)).bvudiv(&as_i32(&op(1))))),
+				I32RemS => result._eq(&to_i32(&as_i32(&op(2)).bvsrem(&as_i32(&op(1))))),
+				I32RemU => result._eq(&to_i32(&as_i32(&op(2)).bvurem(&as_i32(&op(1))))),
+				I32And => result._eq(&to_i32(&as_i32(&op(2)).bvand(&as_i32(&op(1))))),
+				I32Or => result._eq(&to_i32(&as_i32(&op(2)).bvor(&as_i32(&op(1))))),
+				I32Xor => result._eq(&to_i32(&as_i32(&op(2)).bvxor(&as_i32(&op(1))))),
+				I32Shl => result._eq(&to_i32(&as_i32(&op(2)).bvshl(&bvmod32(&as_i32(&op(1)))))),
+				I32ShrS => result._eq(&to_i32(&as_i32(&op(2)).bvashr(&bvmod32(&as_i32(&op(1)))))),
+				I32ShrU => result._eq(&to_i32(&as_i32(&op(2)).bvlshr(&bvmod32(&as_i32(&op(1)))))),
+				I32Rotl => result._eq(&to_i32(&as_i32(&op(2)).bvrotl(&bvmod32(&as_i32(&op(1)))))),
+				I32Rotr => result._eq(&to_i32(&as_i32(&op(2)).bvrotr(&bvmod32(&as_i32(&op(1)))))),
 
-				I64Add => result._eq(&to_i64(&as_i64(&op2).bvadd(&as_i64(&op1)))),
-				I64Sub => result._eq(&to_i64(&as_i64(&op2).bvsub(&as_i64(&op1)))),
-				I64Mul => result._eq(&to_i64(&as_i64(&op2).bvmul(&as_i64(&op1)))),
-				I64DivS => result._eq(&to_i64(&as_i64(&op2).bvsdiv(&as_i64(&op1)))),
-				I64DivU => result._eq(&to_i64(&as_i64(&op2).bvudiv(&as_i64(&op1)))),
-				I64RemS => result._eq(&to_i64(&as_i64(&op2).bvsrem(&as_i64(&op1)))),
-				I64RemU => result._eq(&to_i64(&as_i64(&op2).bvurem(&as_i64(&op1)))),
-				I64And => result._eq(&to_i64(&as_i64(&op2).bvand(&as_i64(&op1)))),
-				I64Or => result._eq(&to_i64(&as_i64(&op2).bvor(&as_i64(&op1)))),
-				I64Xor => result._eq(&to_i64(&as_i64(&op2).bvxor(&as_i64(&op1)))),
-				I64Shl => result._eq(&to_i64(&as_i64(&op2).bvshl(&bvmod64(&as_i64(&op1))))),
-				I64ShrS => result._eq(&to_i64(&as_i64(&op2).bvashr(&bvmod64(&as_i64(&op1))))),
-				I64ShrU => result._eq(&to_i64(&as_i64(&op2).bvlshr(&bvmod64(&as_i64(&op1))))),
-				I64Rotl => result._eq(&to_i64(&as_i64(&op2).bvrotl(&bvmod64(&as_i64(&op1))))),
-				I64Rotr => result._eq(&to_i64(&as_i64(&op2).bvrotr(&bvmod64(&as_i64(&op1))))),
+				I64Add => result._eq(&op(2).bvadd(&op(1))),
+				I64Sub => result._eq(&op(2).bvsub(&op(1))),
+				I64Mul => result._eq(&op(2).bvmul(&op(1))),
+				I64DivS => result._eq(&op(2).bvsdiv(&op(1))),
+				I64DivU => result._eq(&op(2).bvudiv(&op(1))),
+				I64RemS => result._eq(&op(2).bvsrem(&op(1))),
+				I64RemU => result._eq(&op(2).bvurem(&op(1))),
+				I64And => result._eq(&op(2).bvand(&op(1))),
+				I64Or => result._eq(&op(2).bvor(&op(1))),
+				I64Xor => result._eq(&op(2).bvxor(&op(1))),
+				I64Shl => result._eq(&op(2).bvshl(&bvmod64(&op(1)))),
+				I64ShrS => result._eq(&op(2).bvashr(&bvmod64(&op(1)))),
+				I64ShrU => result._eq(&op(2).bvlshr(&bvmod64(&op(1)))),
+				I64Rotl => result._eq(&op(2).bvrotl(&bvmod64(&op(1)))),
+				I64Rotr => result._eq(&op(2).bvrotr(&bvmod64(&op(1)))),
 
-				Select => result._eq(&as_i32(&op1)._eq(&bv32_zero).ite(&op2, &op3)),
+				Select => result._eq(&as_i32(&op(1))._eq(&bv32_zero).ite(&op(2), &op(3))),
 
 				GetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
-					let index_in_range = in_range(&zero, &index, &self.n_locals());
-					result._eq(&self.local(&pc, &index)).and(&[&index_in_range])
+
+					result._eq(&self.local(&pc, &index))
 				}
 				SetLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
-					let local = self.local(&pc, &index);
-					let local_next = self.local(&pc_next, &index);
 
-					let index_in_range = in_range(&zero, &index, &self.n_locals());
-					let local_same_type = self
-						.constants
-						.value_type_config
-						.is_same_type(self.ctx, &op1, &local);
-					let value_is_set = local_next._eq(&op1);
-
-					index_in_range.and(&[&local_same_type, &value_is_set])
+					self.local(&pc_next, &index)._eq(&op(1))
 				}
 				TeeLocal(_) => {
 					let index = variant.accessors[0].apply(&[&instr]);
-					let local = self.local(&pc, &index);
-					let local_next = self.local(&pc_next, &index);
 
-					let index_in_range = in_range(&zero, &index, &self.n_locals());
-					let local_same_type = self
-						.constants
-						.value_type_config
-						.is_same_type(self.ctx, &op1, &local);
-					let value_is_set = local_next._eq(&op1);
-					let stack_set = result._eq(&op1);
+					let local_is_set = self.local(&pc_next, &index)._eq(&op(1));
+					let stack_is_set = result._eq(&op(1));
 
-					index_in_range.and(&[&local_same_type, &value_is_set, &stack_set])
+					local_is_set.and(&[&stack_is_set])
 				}
 			};
 
-			transitions.push(active.implies(&transition.and(&[&correct_type])));
+			transitions.push(active.implies(&transition.and(&[
+				&operand_types_correct,
+				&result_type_correct,
+				&trapped_transition,
+			])));
 		}
 
 		// create vector of references
@@ -391,6 +401,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		// constants
 		let instr = self.program(&pc);
 		let stack_pointer = self.stack_pointer(&pc);
+		let pc_next = pc.add(&[&self.ctx.from_usize(1)]);
 
 		// preserve stack values stack(_, 0)..=stack(_, stack_pointer - pops - 1)
 		let n = self.ctx.named_int_const("n");
@@ -400,13 +411,14 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&n,
 			&stack_pointer.sub(&[&self.constants.stack_pop_count(&instr)]),
 		);
-		let slot_preserved = self
-			.stack(&pc, &n)
-			._eq(&self.stack(&pc.add(&[&self.ctx.from_usize(1)]), &n));
+		let slot_preserved = self.stack(&pc, &n)._eq(&self.stack(&pc_next, &n));
+		let type_preserved = self.stack_type(&pc, &n)._eq(&self.stack_type(&pc_next, &n));
 
 		// forall n
-		self.ctx
-			.forall_const(&[&n], &n_in_range.implies(&slot_preserved))
+		self.ctx.forall_const(
+			&[&n],
+			&n_in_range.implies(&slot_preserved.and(&[&type_preserved])),
+		)
 	}
 
 	fn preserve_locals(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
@@ -414,7 +426,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// preserve all locals which are not set in this step
 		let i = self.ctx.named_int_const("i");
-		let i_in_range = in_range(&self.ctx.from_usize(0), &i, &self.n_locals());
+		let i_in_range = in_range(&self.ctx.from_usize(0), &i, &self.constants.n_locals);
 
 		let variants = &instruction_datatype(self.ctx, self.constants.value_type_config).variants;
 
@@ -441,78 +453,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		)
 	}
 
-	fn transition_trapped(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
-		use Instruction::*;
-
-		let instr = self.program(&pc);
-		let pc_next = pc.add(&[&self.ctx.from_usize(1)]);
-
-		let bv32_zero = self
-			.ctx
-			.from_usize(0)
-			.int2bv(self.constants.value_type_config.i32_size() as u64);
-
-		let op1 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(1)]));
-		let op2 = self.stack(&pc, &self.stack_pointer(&pc).sub(&[&self.ctx.from_i64(2)]));
-
-		let value_type = self.constants.value_type_config.value_type(self.ctx);
-		let as_i32 = |op: &Ast<'ctx>| value_type.variants[0].accessors[0].apply(&[&op]);
-
-		let as_i64 = |op: &Ast<'ctx>| -> Ast<'ctx> {
-			if self.constants.value_type_config.i64_enabled() {
-				value_type.variants[1].accessors[0].apply(&[&op])
-			} else {
-				panic!()
-			}
-		};
-		let bv64_zero = || {
-			if self.constants.value_type_config.i64_enabled() {
-				self.ctx
-					.from_usize(0)
-					.int2bv(self.constants.value_type_config.i64_size() as u64)
-			} else {
-				panic!();
-			}
-		};
-
-		let mut conditions = Vec::new();
-		conditions.push(self.trapped(&pc));
-
-		for (i, variant) in instruction_datatype(self.ctx, self.constants.value_type_config)
-			.variants
-			.iter()
-			.enumerate()
-		{
-			let active = variant.tester.apply(&[&instr]);
-
-			let condition = match Instruction::iter_templates(self.constants.value_type_config)
-				.nth(i)
-				.unwrap()
-			{
-				Unreachable => self.ctx.from_bool(true),
-
-				I32DivU | I32RemU | I32RemS => as_i32(&op2)._eq(&bv32_zero),
-				I32DivS => {
-					let divide_by_zero = as_i32(&op2)._eq(&bv32_zero);
-					let overflow = as_i32(&op2).bvsdiv_no_overflow(&as_i32(&op1));
-					divide_by_zero.or(&[&overflow])
-				}
-				I64DivU | I64RemU | I64RemS => as_i64(&op2)._eq(&bv64_zero()),
-				I64DivS => {
-					let divide_by_zero = as_i64(&op2)._eq(&bv64_zero());
-					let overflow = as_i64(&op2).bvsdiv_no_overflow(&as_i64(&op1));
-					divide_by_zero.or(&[&overflow])
-				}
-				_ => continue,
-			};
-			conditions.push(active.and(&[&condition]));
-		}
-
-		let conditions: Vec<&Ast> = conditions.iter().collect();
-		let any_condition = self.ctx.from_bool(false).or(&conditions);
-		any_condition._eq(&self.trapped(&pc_next))
-	}
-
 	// stack_pointer - 1 is top of stack
 	pub fn stack_pointer(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
 		let stack_pointer_func = self.ctx.func_decl(
@@ -532,10 +472,27 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 				&self.ctx.int_sort(), // instruction counter
 				&self.ctx.int_sort(), // stack address
 			],
-			&self.constants.value_type_config.value_type(self.ctx).sort,
+			&self.constants.value_type_config.value_sort(self.ctx),
 		);
 
 		stack_func.apply(&[pc, index])
+	}
+
+	pub fn stack_type(&self, pc: &Ast<'ctx>, index: &Ast<'ctx>) -> Ast<'ctx> {
+		let stack_type_func = self.ctx.func_decl(
+			self.ctx.str_sym(&(self.prefix.to_owned() + "stack_type")),
+			&[
+				&self.ctx.int_sort(), // program counter
+				&self.ctx.int_sort(), // index
+			],
+			&self
+				.constants
+				.value_type_config
+				.value_type_datatype(self.ctx)
+				.sort,
+		);
+
+		stack_type_func.apply(&[pc, index])
 	}
 
 	pub fn program(&self, pc: &Ast<'ctx>) -> Ast<'ctx> {
@@ -552,7 +509,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let local_func = self.ctx.func_decl(
 			self.ctx.str_sym(&(self.prefix.to_owned() + "local")),
 			&[&self.ctx.int_sort(), &self.ctx.int_sort()],
-			&self.constants.value_type_config.value_type(self.ctx).sort,
+			&self.constants.value_type_config.value_sort(self.ctx),
 		);
 
 		local_func.apply(&[pc, index])
@@ -572,12 +529,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		self.ctx
 			.named_int_const(&(self.prefix.to_owned() + "program_length"))
 	}
-
-	// number of locals including params
-	pub fn n_locals(&self) -> Ast<'ctx> {
-		self.ctx
-			.named_int_const(&(self.prefix.to_owned() + "n_locals"))
-	}
 }
 
 #[cfg(test)]
@@ -593,8 +544,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Nop, Const(I32(2)), I32Add];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -620,8 +574,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Const(I32(2)), I32Add];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -641,8 +598,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Const(I32(2)), I32Add];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -669,8 +629,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Const(I32(2))];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -688,8 +651,11 @@ mod tests {
 
 		let program = &[Const(I32(1))];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -705,16 +671,18 @@ mod tests {
 		};
 		assert_eq!(eval_int(&state.stack_pointer(&ctx.from_usize(1))), 1);
 
-		let value_type = constants.value_type_config.value_type(&ctx);
-		let eval_bv = |ast: &Ast| -> i64 {
-			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
-			let evaled = model.eval(&inner.bv2int(true)).unwrap();
-			evaled.as_i64().unwrap()
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
 		};
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
-			1
-		);
+		assert_eq!(stack(1, 0), Value::I32(1));
 	}
 
 	#[test]
@@ -724,8 +692,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Nop, Const(I32(2)), I32Add];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -735,32 +706,22 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
-		let value_type = constants.value_type_config.value_type(&ctx);
-		let eval_bv = |ast: &Ast| -> i64 {
-			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
-			let evaled = model.eval(&inner.bv2int(true)).unwrap();
-			evaled.as_i64().unwrap()
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
 		};
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(2), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(1))),
-			2
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
-			3
-		);
+		assert_eq!(stack(1, 0), Value::I32(1));
+		assert_eq!(stack(2, 0), Value::I32(1));
+		assert_eq!(stack(3, 0), Value::I32(1));
+		assert_eq!(stack(3, 1), Value::I32(2));
+		assert_eq!(stack(4, 0), Value::I32(3));
 	}
 
 	#[test]
@@ -770,8 +731,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Nop, Const(I32(2)), I32Add];
 
-		let value_type_config = ValueTypeConfig::OnlyI32;
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: None,
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -781,32 +745,22 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
-		let value_type = constants.value_type_config.value_type(&ctx);
-		let eval_bv = |ast: &Ast| -> i64 {
-			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
-			let evaled = model.eval(&inner.bv2int(true)).unwrap();
-			evaled.as_i64().unwrap()
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
 		};
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(2), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(1))),
-			2
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
-			3
-		);
+		assert_eq!(stack(1, 0), Value::I32(1));
+		assert_eq!(stack(2, 0), Value::I32(1));
+		assert_eq!(stack(3, 0), Value::I32(1));
+		assert_eq!(stack(3, 1), Value::I32(2));
+		assert_eq!(stack(4, 0), Value::I32(3));
 	}
 
 	#[test]
@@ -816,8 +770,11 @@ mod tests {
 
 		let program = &[Const(I64(1)), Nop, Const(I64(2)), I64Add];
 
-		let value_type_config = ValueTypeConfig::Mixed(8, 16);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 8,
+			i64_size: Some(16),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 
 		state.set_source_program(program);
@@ -827,32 +784,22 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
-		let value_type = constants.value_type_config.value_type(&ctx);
-		let eval_bv = |ast: &Ast| -> i64 {
-			let inner = value_type.variants[1].accessors[0].apply(&[ast]);
-			let evaled = model.eval(&inner.bv2int(true)).unwrap();
-			evaled.as_i64().unwrap()
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
 		};
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(2), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(0))),
-			1
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(3), &ctx.from_usize(1))),
-			2
-		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
-			3
-		);
+		assert_eq!(stack(1, 0), Value::I64(1));
+		assert_eq!(stack(2, 0), Value::I64(1));
+		assert_eq!(stack(3, 0), Value::I64(1));
+		assert_eq!(stack(3, 1), Value::I64(2));
+		assert_eq!(stack(4, 0), Value::I64(3));
 	}
 
 	#[test]
@@ -862,9 +809,14 @@ mod tests {
 
 		let program = &[I32Add];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
 		let constants = Constants::new(
 			&ctx,
+			&solver,
+			vec![],
 			vec![],
 			&[ValueType::I32, ValueType::I32],
 			value_type_config,
@@ -878,20 +830,25 @@ mod tests {
 		assert!(solver.check());
 		let model = solver.get_model();
 
-		let value_type = constants.value_type_config.value_type(&ctx);
-		let eval_bv = |ast: &Ast| -> i64 {
-			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
-			let evaled = model.eval(&inner.bv2int(true)).unwrap();
-			evaled.as_i64().unwrap()
-		};
-
-		let x0 = value_type.variants[0].accessors[0].apply(&[&constants.initial_stack[0]]);
-		let x1 = value_type.variants[0].accessors[0].apply(&[&constants.initial_stack[1]]);
+		let x0 = value_type_config.i64_unwrap_as_i32(&constants.initial_stack[0]);
+		let x1 = value_type_config.i64_unwrap_as_i32(&constants.initial_stack[1]);
 		let sum = x0.bvadd(&x1);
 
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
+		};
+
 		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(1), &ctx.from_usize(0))),
-			model.eval(&sum.bv2int(true)).unwrap().as_i64().unwrap()
+			stack(1, 0),
+			Value::I32(model.eval(&sum.bv2int(true)).unwrap().as_i32().unwrap())
 		);
 	}
 
@@ -902,8 +859,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Drop];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		solver.assert(&state.transitions());
@@ -928,8 +888,11 @@ mod tests {
 
 		let program = &[Const(I32(1)), Const(I32(2)), Const(I32(3)), Select];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		solver.assert(&state.transitions());
@@ -946,16 +909,18 @@ mod tests {
 			1
 		);
 
-		let value_type = constants.value_type_config.value_type(&ctx);
-		let eval_bv = |ast: &Ast| -> i64 {
-			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
-			let evaled = model.eval(&inner.bv2int(true)).unwrap();
-			evaled.as_i64().unwrap()
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
 		};
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
-			1
-		);
+		assert_eq!(stack(4, 0), Value::I32(1));
 	}
 
 	#[test]
@@ -965,21 +930,17 @@ mod tests {
 
 		let program = &[Const(I32(1)), Const(I32(2)), Const(I32(0)), Select];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 		solver.assert(&state.transitions());
 
 		assert!(solver.check());
 		let model = solver.get_model();
-
-		let value_type = constants.value_type_config.value_type(&ctx);
-		let eval_bv = |ast: &Ast| -> i64 {
-			let inner = value_type.variants[0].accessors[0].apply(&[ast]);
-			let evaled = model.eval(&inner.bv2int(true)).unwrap();
-			evaled.as_i64().unwrap()
-		};
 
 		assert_eq!(
 			model
@@ -989,10 +950,19 @@ mod tests {
 				.unwrap(),
 			1
 		);
-		assert_eq!(
-			eval_bv(&state.stack(&ctx.from_usize(4), &ctx.from_usize(0))),
-			2
-		);
+
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
+		};
+		assert_eq!(stack(4, 0), Value::I32(2));
 	}
 
 	#[test]
@@ -1014,22 +984,30 @@ mod tests {
 			TeeLocal(0),
 		];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let value_type = value_type_config.value_type(&ctx);
-		let as_i32 = &value_type.variants[0].accessors[0];
-		let to_i32 = &value_type.variants[0].constructor;
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+
 		let initial_locals = vec![
-			to_i32.apply(&[&ctx.from_usize(1).int2bv(32)]),
-			to_i32.apply(&[&ctx.from_usize(2).int2bv(32)]),
-			to_i32.apply(&[&ctx.from_usize(0).int2bv(32)]),
+			Value::I32(1).encode(&ctx, value_type_config),
+			Value::I32(2).encode(&ctx, value_type_config),
+			Value::I32(0).encode(&ctx, value_type_config),
 		];
 
-		let constants = Constants::new(&ctx, initial_locals, &[], value_type_config);
+		let constants = Constants::new(
+			&ctx,
+			&solver,
+			initial_locals,
+			vec![ValueType::I32; 3],
+			&[],
+			value_type_config,
+		);
 
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 
-		solver.assert(&state.n_locals()._eq(&ctx.from_usize(3)));
+		solver.assert(&constants.n_locals._eq(&ctx.from_usize(3)));
 
 		solver.assert(&state.transitions());
 
@@ -1037,7 +1015,7 @@ mod tests {
 		let model = solver.get_model();
 
 		assert_eq!(
-			model.eval(&state.n_locals()).unwrap().as_usize().unwrap(),
+			model.eval(&constants.n_locals).unwrap().as_usize().unwrap(),
 			3
 		);
 
@@ -1049,55 +1027,50 @@ mod tests {
 				.unwrap()
 		};
 
-		let stack = |pc, i| {
-			model
-				.eval(
-					&as_i32
-						.apply(&[&state.stack(&ctx.from_usize(pc), &ctx.from_usize(i))])
-						.bv2int(false),
-				)
-				.unwrap()
-				.as_usize()
-				.unwrap()
+		let stack = |pc: usize, i: usize| -> Value {
+			let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
+
+			Value::decode(
+				value,
+				&model,
+				value_type_config.decode_value_type(&ctx, &model, ty),
+				value_type_config,
+			)
 		};
-		let local = |pc, i| {
-			model
-				.eval(
-					&as_i32
-						.apply(&[&state.local(&ctx.from_usize(pc), &ctx.from_usize(i))])
-						.bv2int(false),
-				)
-				.unwrap()
-				.as_usize()
-				.unwrap()
+		let local = |pc: usize, i: usize| -> Value {
+			let value = &state.local(&ctx.from_usize(pc), &ctx.from_usize(i));
+			let ty = ValueType::I32;
+
+			Value::decode(value, &model, ty, value_type_config)
 		};
 
-		assert_eq!(local(0, 0), 1);
-		assert_eq!(local(0, 1), 2);
+		assert_eq!(local(0, 0), Value::I32(1));
+		assert_eq!(local(0, 1), Value::I32(2));
 		// default value
-		assert_eq!(local(0, 2), 0);
+		assert_eq!(local(0, 2), Value::I32(0));
 
 		// locals keep their values if not changed
-		assert_eq!(local(1, 0), 1);
-		assert_eq!(local(1, 1), 2);
-		assert_eq!(local(1, 2), 0);
+		assert_eq!(local(1, 0), Value::I32(1));
+		assert_eq!(local(1, 1), Value::I32(2));
+		assert_eq!(local(1, 2), Value::I32(0));
 
 		assert_eq!(stack_pointer(1), 1);
-		assert_eq!(stack(1, 0), 1);
+		assert_eq!(stack(1, 0), Value::I32(1));
 		assert_eq!(stack_pointer(2), 2);
-		assert_eq!(stack(2, 1), 2);
+		assert_eq!(stack(2, 1), Value::I32(2));
 
 		// correct value before set_local
 		assert_eq!(stack_pointer(3), 1);
-		assert_eq!(stack(3, 0), 3);
+		assert_eq!(stack(3, 0), Value::I32(3));
 
 		assert_eq!(stack_pointer(4), 0);
-		assert_eq!(local(4, 2), 3);
+		assert_eq!(local(4, 2), Value::I32(3));
 
 		assert_eq!(stack_pointer(8), 1);
-		assert_eq!(stack(8, 0), 2);
-		assert_eq!(local(8, 0), 2);
-		assert_eq!(local(8, 1), 1);
+		assert_eq!(stack(8, 0), Value::I32(2));
+		assert_eq!(local(8, 0), Value::I32(2));
+		assert_eq!(local(8, 1), Value::I32(1));
 	}
 
 	#[test]
@@ -1107,8 +1080,11 @@ mod tests {
 
 		let program = &[Unreachable, Nop];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 
@@ -1137,8 +1113,11 @@ mod tests {
 
 		let program = &[Const(I32(0)), Const(I32(1)), I32DivU];
 
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 		let state = State::new(&ctx, &solver, &constants, "");
 		state.set_source_program(program);
 

@@ -87,7 +87,10 @@ fn action_result(
 
 			let ctx = Context::new(&Config::default());
 			let solver = Solver::new(&ctx);
-			let value_type_config = ValueTypeConfig::Mixed(32, 64);
+			let value_type_config = ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			};
 
 			// create values of initial locals: arguments then 0s for all other locals
 			let args: Vec<_> = args
@@ -110,7 +113,14 @@ fn action_result(
 				.map(|v| v.encode(&ctx, value_type_config))
 				.collect();
 
-			let constants = Constants::new(&ctx, initial_locals, &[], value_type_config);
+			let constants = Constants::new(
+				&ctx,
+				&solver,
+				initial_locals,
+				function.local_types.clone(),
+				&[],
+				value_type_config,
+			);
 			let state = State::new(&ctx, &solver, &constants, "");
 
 			state.set_source_program(&function.instructions[0].as_ref().left().unwrap());
@@ -126,10 +136,11 @@ fn action_result(
 				.as_usize()
 				.unwrap();
 			if sp > 0 {
+				let sp = state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)]);
 				let i = Value::decode(
-					&state.stack(&pc, &state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)])),
-					&ctx,
+					&state.stack(&pc, &sp),
 					&model,
+					value_type_config.decode_value_type(&ctx, &model, &state.stack_type(&pc, &sp)),
 					value_type_config,
 				);
 				Some(vec![i])

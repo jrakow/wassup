@@ -40,8 +40,14 @@ pub fn superoptimize_func_body(
 	let mut function = Function::from_wasm_func_body_params(func_body, params);
 	for snippet in function.instructions.iter_mut() {
 		if let Either::Left(vec) = snippet {
-			let optimized =
-				superoptimize_snippet(&vec, &function.local_types, ValueTypeConfig::Mixed(32, 64));
+			let optimized = superoptimize_snippet(
+				&vec,
+				&function.local_types,
+				ValueTypeConfig {
+					i32_size: 4,
+					i64_size: Some(8),
+				},
+			); // TODO
 			*vec = optimized;
 		}
 	}
@@ -63,23 +69,32 @@ pub fn superoptimize_snippet(
 
 	let mut initial_locals = Vec::new();
 	let mut initial_locals_bounds = Vec::new();
-	let datatype = value_type_config.value_type(&ctx);
 	for ty in local_types {
-		let sort = match ty {
-			ValueType::I32 => ctx.bitvector_sort(32),
-			ValueType::I64 => ctx.bitvector_sort(64),
-			_ => unimplemented!(),
-		};
-		let inner = ctx.fresh_const("initial_local", &sort);
-		initial_locals_bounds.push(inner.clone());
+		if *ty == ValueType::I32 {
+			let sort = ctx.bitvector_sort(value_type_config.i32_size as u32);
 
-		let value = datatype.variants[value_type_config.value_type_to_index(ty)]
-			.constructor
-			.apply(&[&inner]);
-		initial_locals.push(value);
+			let bound = ctx.fresh_const("initial_local", &sort);
+			initial_locals_bounds.push(bound.clone());
+
+			initial_locals.push(value_type_config.i32_wrap_as_i64(&ctx, &bound));
+		} else if *ty == ValueType::I64 {
+			let sort = ctx.bitvector_sort(value_type_config.i64_size.unwrap() as u32);
+
+			let bound = ctx.fresh_const("initial_local", &sort);
+			initial_locals_bounds.push(bound.clone());
+
+			initial_locals.push(bound)
+		}
 	}
 
-	let constants = Constants::new(&ctx, initial_locals, &initial_stack, value_type_config);
+	let constants = Constants::new(
+		&ctx,
+		&solver,
+		initial_locals,
+		local_types.to_vec(),
+		&initial_stack,
+		value_type_config,
+	);
 
 	let source_state = State::new(&ctx, &solver, &constants, "source_");
 	let target_state = State::new(&ctx, &solver, &constants, "target_");
@@ -139,7 +154,14 @@ mod tests {
 	#[ignore]
 	fn superoptimize_nop() {
 		let source_program = &[Const(I32(1)), Nop];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
 		assert_eq!(target, vec![Const(I32(1))]);
 	}
 
@@ -147,7 +169,14 @@ mod tests {
 	#[ignore]
 	fn superoptimize_consts_add() {
 		let source_program = &[Const(I32(1)), Const(I32(2)), I32Add];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
 		assert_eq!(target, vec![Const(I32(3))]);
 	}
 
@@ -155,7 +184,14 @@ mod tests {
 	#[ignore]
 	fn superoptimize_consts_add_64bit() {
 		let source_program = &[Const(I64(1)), Const(I64(2)), I64Add];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
 		assert_eq!(target, vec![Const(I64(3))]);
 	}
 
@@ -163,7 +199,14 @@ mod tests {
 	#[ignore]
 	fn superoptimize_add() {
 		let source_program = &[Const(I32(0)), I32Add];
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
 		assert_eq!(target, vec![]);
 	}
 
@@ -172,7 +215,14 @@ mod tests {
 		let source_program = &[Const(I32(3)), SetLocal(0)];
 
 		// no optimization possible, because locals cannot be changed
-		let target = superoptimize_snippet(source_program, &[], ValueTypeConfig::Mixed(8, 16));
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
 		assert_eq!(target, source_program);
 	}
 
@@ -183,7 +233,10 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig::Mixed(8, 16),
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
 		);
 		assert_eq!(target, vec![Unreachable]);
 	}

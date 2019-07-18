@@ -7,7 +7,14 @@ fn const0_add(c: &mut Criterion) {
 		b.iter(|| {
 			let source = &[Const(I32(0)), I32Add];
 
-			superoptimize_snippet(black_box(source), &[], ValueTypeConfig::Mixed(32, 64))
+			superoptimize_snippet(
+				black_box(source),
+				&[],
+				ValueTypeConfig {
+					i32_size: 32,
+					i64_size: Some(64),
+				},
+			)
 		})
 	});
 }
@@ -17,7 +24,14 @@ fn consts_add(c: &mut Criterion) {
 		b.iter(|| {
 			let source = &[Const(I32(1)), Const(I32(2)), I32Add];
 
-			superoptimize_snippet(black_box(source), &[], ValueTypeConfig::Mixed(32, 64))
+			superoptimize_snippet(
+				black_box(source),
+				&[],
+				ValueTypeConfig {
+					i32_size: 32,
+					i64_size: Some(64),
+				},
+			)
 		})
 	});
 }
@@ -27,7 +41,14 @@ fn const_nop(c: &mut Criterion) {
 		b.iter(|| {
 			let source = &[Const(I32(1)), Nop];
 
-			superoptimize_snippet(black_box(source), &[], ValueTypeConfig::Mixed(32, 64))
+			superoptimize_snippet(
+				black_box(source),
+				&[],
+				ValueTypeConfig {
+					i32_size: 32,
+					i64_size: Some(64),
+				},
+			)
 		})
 	});
 }

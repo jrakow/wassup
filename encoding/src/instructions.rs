@@ -350,7 +350,13 @@ impl Instruction {
 			[self.as_usize(value_type_config)]
 		.constructor;
 		match self {
-			Const(i) => constructor.apply(&[&i.encode(ctx, value_type_config)]),
+			Const(i) => {
+				let ty = i.value_type();
+				constructor.apply(&[
+					&i.encode(ctx, value_type_config),
+					&value_type_config.encode_value_type(ctx, ty),
+				])
+			}
 			GetLocal(i) | SetLocal(i) | TeeLocal(i) => constructor.apply(&[&ctx.from_u32(*i)]),
 			_ => constructor.apply(&[]),
 		}
@@ -373,9 +379,10 @@ impl Instruction {
 				if model.eval(&active).unwrap().as_bool().unwrap() {
 					Some(match template {
 						Const(_) => {
+							let ty = variant.accessors[1].apply(&[&encoded_instr]);
+							let ty = value_type_config.decode_value_type(ctx, model, &ty);
 							let encoded_value = variant.accessors[0].apply(&[&encoded_instr]);
-							let value =
-								Value::decode(&encoded_value, ctx, model, value_type_config);
+							let value = Value::decode(&encoded_value, model, ty, value_type_config);
 
 							Const(value)
 						}
@@ -485,16 +492,20 @@ impl From<Instruction> for PInstruction {
 /// Datatype for instructions in Z3
 ///
 /// Instructions are indexed according to their enum discriminant.
-pub fn instruction_datatype<'ctx>(
-	ctx: &'ctx Context,
-	value_type_config: ValueTypeConfig,
-) -> Datatype<'ctx> {
+pub fn instruction_datatype(ctx: &Context, value_type_config: ValueTypeConfig) -> Datatype {
 	let mut datatype = DatatypeBuilder::new(ctx);
-	let value_sort = value_type_config.value_type(ctx).sort;
+	let value_sort = value_type_config.value_sort(ctx);
+	let value_type_datatype = value_type_config.value_type_datatype(ctx);
 
 	for i in Instruction::iter_templates(value_type_config) {
 		datatype = match i {
-			Instruction::Const(_) => datatype.variant("Const", &[("value", &value_sort)]),
+			Instruction::Const(_) => datatype.variant(
+				"Const",
+				&[
+					("value", &value_sort),
+					("value_type", &value_type_datatype.sort),
+				],
+			),
 			Instruction::GetLocal(_) => {
 				datatype.variant("GetLocal", &[("get_local_index", &ctx.int_sort())])
 			}
@@ -540,8 +551,11 @@ mod tests {
 			Context::new(&cfg)
 		};
 		let solver = Solver::new(&ctx);
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-		let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+		let value_type_config = ValueTypeConfig {
+			i32_size: 32,
+			i64_size: Some(64),
+		};
+		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 
 		assert!(solver.check());
 		let model = solver.get_model();

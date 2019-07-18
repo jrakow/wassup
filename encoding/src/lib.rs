@@ -35,18 +35,22 @@ pub fn equivalent<'ctx>(
 		let n = ctx.named_int_const("n");
 		let n_in_range = in_range(&ctx.from_u64(0), &n, &lhs.stack_pointer(&lhs_pc));
 
-		// lhs-stack(lhs_pc, n) ==  rhs-stack(rhs_pc, n)
-		let condition = lhs.stack(&lhs_pc, &n)._eq(&rhs.stack(&rhs_pc, &n));
+		let values_equal = lhs.stack(&lhs_pc, &n)._eq(&rhs.stack(&rhs_pc, &n));
+		let types_equal = lhs
+			.stack_type(&lhs_pc, &n)
+			._eq(&rhs.stack_type(&rhs_pc, &n));
 
-		ctx.forall_const(&[&n], &n_in_range.implies(&condition))
+		ctx.forall_const(
+			&[&n],
+			&n_in_range.implies(&values_equal.and(&[&types_equal])),
+		)
 	};
 
-	// require that both states have the same number of locals and that they are all equal
-	// TODO maybe relax this in the future for more optimization potential
-	let n_locals_equal = lhs.n_locals()._eq(&rhs.n_locals());
+	// both states have the same number of locals as they have the same constants
+	let n_locals = &lhs.constants.n_locals;
 	let locals_equal = {
 		let n = ctx.named_int_const("n");
-		let n_in_range = in_range(&ctx.from_u64(0), &n, &lhs.n_locals());
+		let n_in_range = in_range(&ctx.from_u64(0), &n, &n_locals);
 
 		let condition = lhs.local(&lhs_pc, &n)._eq(&rhs.local(&rhs_pc, &n));
 
@@ -61,7 +65,6 @@ pub fn equivalent<'ctx>(
 	let states_equal = ctx.from_bool(true).and(&[
 		&stack_pointers_equal,
 		&stacks_equal,
-		&n_locals_equal,
 		&locals_equal,
 		&trapped_equal,
 	]);
@@ -83,63 +86,59 @@ impl Value {
 		ctx: &'ctx Context,
 		value_type_config: ValueTypeConfig,
 	) -> Ast<'ctx> {
-		let datatype = value_type_config.value_type(ctx);
-
-		let (variant_index, encoded_value) = match self {
+		match self {
 			Value::I32(i) => {
-				let size = value_type_config.i32_size();
+				let size = value_type_config.i32_size;
 				if size < 32 {
 					assert!((*i as u32) < 1 << size as u32);
 				}
 
-				(0, ctx.from_i32(*i).int2bv(size as u64))
+				if let Some(i64_size) = value_type_config.i64_size {
+					// extend to size of I64
+					ctx.from_i32(*i).int2bv(i64_size as u64)
+				} else {
+					ctx.from_i32(*i).int2bv(size as u64)
+				}
 			}
 			Value::I64(i) => {
-				let size = value_type_config.i64_size();
+				let size = value_type_config.i64_size.unwrap();
 				if size < 64 {
 					assert!((*i as u64) < 1 << size as u64);
 				}
 
-				(1, ctx.from_i64(*i).int2bv(size as u64))
+				ctx.from_i64(*i).int2bv(size as u64)
 			}
 			_ => unimplemented!(),
-		};
+		}
+	}
 
-		datatype.variants[variant_index]
-			.constructor
-			.apply(&[&encoded_value])
+	pub fn value_type(&self) -> ValueType {
+		match self {
+			Value::I32(_) => ValueType::I32,
+			Value::I64(_) => ValueType::I64,
+			_ => unimplemented!(),
+		}
 	}
 
 	pub fn decode(
 		v: &Ast,
-		ctx: &Context,
 		model: &Model,
+		value_type: ValueType,
 		value_type_config: ValueTypeConfig,
 	) -> Self {
-		let dataype = value_type_config.value_type(ctx);
+		match value_type {
+			ValueType::I32 => {
+				// only lower part
+				let int = v.bvextract(value_type_config.i32_size - 1, 0).bv2int(true);
+				let int = model.eval(&int).unwrap();
 
-		let index = dataype
-			.variants
-			.iter()
-			.position(|variant| {
-				let active = variant.tester.apply(&[&v]);
-				model.eval(&active).unwrap().as_bool().unwrap()
-			})
-			.unwrap();
-
-		let inner = model
-			.eval(
-				&dataype.variants[index].accessors[0]
-					.apply(&[&v])
-					.bv2int(true),
-			)
-			.unwrap();
-
-		match index {
-			0 => Value::I32(inner.as_i32().unwrap()),
-			1 => Value::I64(inner.as_i64().unwrap()),
-			2 | 3 => unimplemented!(),
-			_ => unreachable!(),
+				Value::I32(int.as_i32().unwrap())
+			}
+			ValueType::I64 => {
+				let int = model.eval(&v.bv2int(true)).unwrap();
+				Value::I64(int.as_i64().unwrap())
+			}
+			_ => unimplemented!(),
 		}
 	}
 }
@@ -148,80 +147,81 @@ impl Value {
 /// How to represent a value type
 ///
 /// I32 is always needed, so there is no 64 bit only
-pub enum ValueTypeConfig {
-	/// Enable only I32 variant
-	OnlyI32,
-	/// Enable both variants with the given sizes
-	Mixed(usize, usize),
+pub struct ValueTypeConfig {
+	pub i32_size: usize,
+	pub i64_size: Option<usize>,
 }
 
 impl ValueTypeConfig {
 	/// Representation of a value in Z3
-	pub fn value_type<'ctx>(&self, ctx: &'ctx Context) -> Datatype<'ctx> {
-		let mut builder = DatatypeBuilder::new(ctx).variant(
-			"I32",
-			&[("as_i32", &ctx.bitvector_sort(self.i32_size() as u32))],
-		);
-
-		if self.i64_enabled() {
-			builder = builder.variant(
-				"I64",
-				&[("as_i64", &ctx.bitvector_sort(self.i64_size() as u32))],
-			)
-		}
-
-		builder.finish("Value")
+	pub fn value_sort<'ctx>(&self, ctx: &'ctx Context) -> Sort<'ctx> {
+		ctx.bitvector_sort(self.i64_size.unwrap_or(self.i32_size) as u32)
 	}
 
-	pub fn value_type_to_index(&self, v: &ValueType) -> usize {
-		match v {
-			ValueType::I32 => 0,
-			ValueType::I64 if self.i64_enabled() => 1,
-			ValueType::I64 => unreachable!(),
+	/// Representation of a value type in Z3
+	pub fn value_type_datatype<'ctx>(&self, ctx: &'ctx Context) -> Datatype<'ctx> {
+		let mut builder = DatatypeBuilder::new(ctx).variant("I32", &[]);
+		if self.i64_enabled() {
+			builder = builder.variant("I64", &[]);
+		}
+
+		builder.finish("ValueType")
+	}
+
+	pub fn encode_value_type<'ctx>(&self, ctx: &'ctx Context, value_type: ValueType) -> Ast<'ctx> {
+		let datatype = self.value_type_datatype(ctx);
+		match value_type {
+			ValueType::I32 => datatype.variants[0].constructor.apply(&[]),
+			ValueType::I64 => datatype.variants[1].constructor.apply(&[]),
 			_ => unimplemented!(),
 		}
 	}
 
-	pub fn is_same_type<'ctx>(
+	pub fn decode_value_type<'ctx>(
 		&self,
 		ctx: &'ctx Context,
-		lhs: &Ast<'ctx>,
-		rhs: &Ast<'ctx>,
-	) -> Ast<'ctx> {
-		let value_type = self.value_type(ctx);
+		model: &Model<'ctx>,
+		i: &Ast<'ctx>,
+	) -> ValueType {
+		let datatype = self.value_type_datatype(ctx);
 
-		let conditions: Vec<_> = value_type
-			.variants
-			.iter()
-			.map(|v| {
-				let lhs_is_active_variant = v.tester.apply(&[&lhs]);
-				let rhs_is_active_variant = v.tester.apply(&[&rhs]);
-				lhs_is_active_variant.and(&[&rhs_is_active_variant])
-			})
-			.collect();
-		let conditions: Vec<&Ast> = conditions.iter().collect();
-
-		ctx.from_bool(false).or(&conditions)
+		if self.i64_size.is_none() {
+			ValueType::I32
+		} else {
+			if model
+				.eval(&datatype.variants[0].tester.apply(&[&i]))
+				.unwrap()
+				.as_bool()
+				.unwrap()
+			{
+				ValueType::I32
+			} else {
+				ValueType::I64
+			}
+		}
 	}
 
 	pub fn i64_enabled(&self) -> bool {
-		match *self {
-			ValueTypeConfig::OnlyI32 => false,
-			ValueTypeConfig::Mixed(..) => true,
+		self.i64_size.is_some()
+	}
+
+	pub fn i32_wrap_as_i64<'ctx>(&self, ctx: &'ctx Context, i: &Ast<'ctx>) -> Ast<'ctx> {
+		if let Some(i64_size) = self.i64_size {
+			// fill upper part of word with undefined bits
+			let upper_sort = ctx.bitvector_sort((i64_size - self.i32_size) as u32);
+			let undefined = ctx.fresh_const("undefined", &upper_sort);
+
+			undefined.concat(i)
+		} else {
+			i.clone()
 		}
 	}
 
-	pub fn i32_size(&self) -> usize {
-		match *self {
-			ValueTypeConfig::OnlyI32 => 32,
-			ValueTypeConfig::Mixed(i, _) => i,
-		}
-	}
-
-	pub fn i64_size(&self) -> usize {
-		match *self {
-			ValueTypeConfig::OnlyI32 => unreachable!(),
-			ValueTypeConfig::Mixed(_, i) => i,
+	pub fn i64_unwrap_as_i32<'ctx>(&self, i: &Ast<'ctx>) -> Ast<'ctx> {
+		if self.i64_size.is_some() {
+			i.bvextract(self.i32_size - 1, 0)
+		} else {
+			i.clone()
 		}
 	}
 }
@@ -245,38 +245,5 @@ mod tests {
 
 		let program = &[Const(I32(1)), Const(I32(1)), Const(I32(1)), I32Add];
 		assert_eq!(stack_depth(program), 0);
-	}
-
-	#[test]
-	fn is_same_type_test() {
-		let ctx = Context::new(&Config::new());
-		let value_type_config = ValueTypeConfig::Mixed(32, 64);
-
-		let value_type = value_type_config.value_type(&ctx);
-		let i0 = value_type.variants[0]
-			.constructor
-			.apply(&[&ctx.from_u32(0).int2bv(32)]);
-		let i1 = value_type.variants[0]
-			.constructor
-			.apply(&[&ctx.from_u32(1).int2bv(32)]);
-		let i2 = value_type.variants[1]
-			.constructor
-			.apply(&[&ctx.from_u32(2).int2bv(64)]);
-
-		let solver = Solver::new(&ctx);
-		assert!(solver.check());
-		let model = solver.get_model();
-
-		let is_same_type = |lhs: &Ast, rhs: &Ast| -> bool {
-			model
-				.eval(&value_type_config.is_same_type(&ctx, lhs, rhs))
-				.unwrap()
-				.as_bool()
-				.unwrap()
-		};
-
-		assert!(is_same_type(&i0, &i1));
-		assert!(!is_same_type(&i1, &i2));
-		assert!(!is_same_type(&i0, &i2));
 	}
 }

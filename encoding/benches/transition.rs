@@ -6,8 +6,11 @@ fn transition_consts_add(source: &[Instruction]) {
 	let ctx = Context::new(&Config::default());
 	let solver = Solver::new(&ctx);
 
-	let value_type_config = ValueTypeConfig::Mixed(32, 64);
-	let constants = Constants::new(&ctx, vec![], &[], value_type_config);
+	let value_type_config = ValueTypeConfig {
+		i32_size: 32,
+		i64_size: Some(64),
+	};
+	let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
 	let state = State::new(&ctx, &solver, &constants, "");
 
 	state.set_source_program(source);
@@ -17,21 +20,22 @@ fn transition_consts_add(source: &[Instruction]) {
 	assert!(solver.check());
 	let model = solver.get_model();
 
-	let value_type = value_type_config.value_type(&ctx);
-	let stack = |pc, i| -> i32 {
-		let pc = &ctx.from_usize(pc);
-		let i = &ctx.from_usize(i);
-		let ast = &state.stack(pc, i);
+	let stack = |pc: usize, i: usize| -> Value {
+		let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
+		let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
 
-		let inner = value_type.variants[0].accessors[0].apply(&[ast]);
-		let evaled = model.eval(&inner.bv2int(true)).unwrap();
-		evaled.as_i32().unwrap()
+		Value::decode(
+			value,
+			&model,
+			value_type_config.decode_value_type(&ctx, &model, ty),
+			value_type_config,
+		)
 	};
 
-	assert_eq!(stack(1, 0), 1);
-	assert_eq!(stack(2, 0), 1);
-	assert_eq!(stack(2, 1), 2);
-	assert_eq!(stack(3, 0), 3);
+	assert_eq!(stack(1, 0), Value::I32(1));
+	assert_eq!(stack(2, 0), Value::I32(1));
+	assert_eq!(stack(2, 1), Value::I32(2));
+	assert_eq!(stack(3, 0), Value::I32(3));
 }
 
 fn consts_add(c: &mut Criterion) {
