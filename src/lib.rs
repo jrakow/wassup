@@ -60,56 +60,55 @@ pub fn superoptimize_snippet(
 	local_types: &[ValueType],
 	value_type_config: ValueTypeConfig,
 ) -> Vec<Instruction> {
-	let config = Config::default();
-	let ctx = Context::new(&config);
-	let solver = Solver::new(&ctx);
-
-	// TODO compute actual stack types
-	let initial_stack = vec![ValueType::I32; stack_depth(&source_program[..])];
-
-	let mut initial_locals = Vec::new();
-	let mut initial_locals_bounds = Vec::new();
-	for ty in local_types {
-		if *ty == ValueType::I32 {
-			let sort = ctx.bitvector_sort(value_type_config.i32_size as u32);
-
-			let bound = ctx.fresh_const("initial_local", &sort);
-			initial_locals_bounds.push(bound.clone());
-
-			initial_locals.push(value_type_config.i32_wrap_as_i64(&ctx, &bound));
-		} else if *ty == ValueType::I64 {
-			let sort = ctx.bitvector_sort(value_type_config.i64_size.unwrap() as u32);
-
-			let bound = ctx.fresh_const("initial_local", &sort);
-			initial_locals_bounds.push(bound.clone());
-
-			initial_locals.push(bound)
-		}
-	}
-
-	let constants = Constants::new(
-		&ctx,
-		&solver,
-		initial_locals,
-		local_types.to_vec(),
-		&initial_stack,
-		value_type_config,
-	);
-
-	let source_state = State::new(&ctx, &solver, &constants, "source_");
-	let target_state = State::new(&ctx, &solver, &constants, "target_");
-	source_state.set_source_program(&source_program[..]);
-
-	let initial_locals_bounds: Vec<&Ast> = initial_locals_bounds.iter().collect();
-	solver.assert(&ctx.forall_const(&initial_locals_bounds, &source_state.transitions()));
-	solver.assert(&ctx.forall_const(&initial_locals_bounds, &target_state.transitions()));
-
-	let target_length = &target_state.program_length();
-
 	let mut current_best = source_program.to_vec();
 
 	loop {
-		solver.push();
+		//		solver.push();
+		let config = Config::default();
+		let ctx = Context::new(&config);
+		let solver = Solver::new(&ctx);
+
+		// TODO compute actual stack types
+		let initial_stack = vec![ValueType::I32; stack_depth(&source_program[..])];
+
+		let mut initial_locals = Vec::new();
+		let mut initial_locals_bounds = Vec::new();
+		for ty in local_types {
+			if *ty == ValueType::I32 {
+				let sort = ctx.bitvector_sort(value_type_config.i32_size as u32);
+
+				let bound = ctx.fresh_const("initial_local", &sort);
+				initial_locals_bounds.push(bound.clone());
+
+				initial_locals.push(value_type_config.i32_wrap_as_i64(&ctx, &bound));
+			} else if *ty == ValueType::I64 {
+				let sort = ctx.bitvector_sort(value_type_config.i64_size.unwrap() as u32);
+
+				let bound = ctx.fresh_const("initial_local", &sort);
+				initial_locals_bounds.push(bound.clone());
+
+				initial_locals.push(bound)
+			}
+		}
+
+		let constants = Constants::new(
+			&ctx,
+			&solver,
+			initial_locals,
+			local_types.to_vec(),
+			&initial_stack,
+			value_type_config,
+		);
+
+		let source_state = State::new(&ctx, &solver, &constants, "source_");
+		let target_state = State::new(&ctx, &solver, &constants, "target_");
+		source_state.set_source_program(&source_program[..]);
+
+		let initial_locals_bounds: Vec<&Ast> = initial_locals_bounds.iter().collect();
+		solver.assert(&ctx.forall_const(&initial_locals_bounds, &source_state.transitions()));
+		solver.assert(&ctx.forall_const(&initial_locals_bounds, &target_state.transitions()));
+
+		let target_length = &target_state.program_length();
 
 		// force target program to be shorter than current best
 		solver.assert(&in_range(
@@ -140,7 +139,7 @@ pub fn superoptimize_snippet(
 		let model = solver.get_model();
 		current_best = target_state.decode_program(&model);
 
-		solver.pop(1);
+		//		solver.pop(1);
 	}
 }
 
