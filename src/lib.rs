@@ -152,6 +152,21 @@ mod tests {
 	#[test]
 	#[ignore]
 	fn superoptimize_nop() {
+		let source_program = &[Nop];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![]);
+	}
+
+	#[test]
+	#[ignore]
+	fn superoptimize_const_nop() {
 		let source_program = &[Const(I32(1)), Nop];
 		let target = superoptimize_snippet(
 			source_program,
@@ -196,7 +211,7 @@ mod tests {
 
 	#[test]
 	#[ignore]
-	fn superoptimize_add() {
+	fn superoptimize_add0() {
 		let source_program = &[Const(I32(0)), I32Add];
 		let target = superoptimize_snippet(
 			source_program,
