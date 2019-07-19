@@ -29,6 +29,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	pub fn set_initial(&self) {
+		// TODO
 		// set trapped(0) = false
 		self.solver
 			.assert(&self.trapped(&self.ctx.from_usize(0)).not());
