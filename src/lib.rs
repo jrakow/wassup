@@ -64,7 +64,7 @@ pub fn superoptimize_module(module: &mut parity_wasm::elements::Module) {
 		});
 }
 
-fn superoptimize_impl(
+pub fn superoptimize_impl(
 	source_program: &[PInstruction],
 	n_params: usize,
 	local_types: &[ValueType],
