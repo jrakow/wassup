@@ -151,8 +151,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 			&self.preserve_locals(&pc),
 			&self.transition_stack_pointer(&pc),
 			&self.transition_stack(&pc),
-			// TODO
-			//			&self.transition_trapped(&pc),
 		])
 	}
 
