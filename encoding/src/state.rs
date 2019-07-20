@@ -66,6 +66,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		// constrain 0 <= local_index < n_locals
 		let pc = self.ctx.named_int_const("pc");
+		let pc_in_range = in_range(&self.ctx.from_usize(0), &pc, &self.ctx.from_usize(self.program_length));
 		let instr = self.program(&pc);
 		let mut conditions = Vec::new();
 		for i in &[
@@ -87,7 +88,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		let conditions: Vec<_> = conditions.iter().collect();
 		let combined = self.ctx.from_bool(true).and(&conditions);
 		self.solver
-			.assert(&self.ctx.forall_const(&[&pc], &combined));
+			.assert(&self.ctx.forall_const(&[&pc], &pc_in_range.implies(&combined)));
 	}
 
 	pub fn set_source_program(&self, program: &[Instruction]) {
