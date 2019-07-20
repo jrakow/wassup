@@ -50,7 +50,7 @@ fn consts_add(c: &mut Criterion) {
 
 criterion_group! {
 	name = benches;
-	config = Criterion::default().sample_size(10);
+	config = Criterion::default().sample_size(50);
 	targets = consts_add
 }
 criterion_main!(benches);
