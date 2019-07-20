@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use either::Either;
 use wassup_encoding::*;
 use z3::*;
 
@@ -10,32 +11,28 @@ fn transition_consts_add(source: &[Instruction]) {
 		i32_size: 32,
 		i64_size: Some(64),
 	};
-	let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-	let state = State::new(&ctx, &solver, &constants, "", source.len());
-
-	state.set_source_program(source);
-
-	solver.assert(&state.transitions());
+	let constants = Constants::new(
+		&ctx,
+		&solver,
+		vec![],
+		vec![],
+		vec![],
+		&[],
+		value_type_config,
+	);
+	let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(source));
 
 	assert!(solver.check());
 	let model = solver.get_model();
 
-	let stack = |pc: usize, i: usize| -> Value {
-		let value = &state.stack(&ctx.from_usize(pc), &ctx.from_usize(i));
-		let ty = &state.stack_type(&ctx.from_usize(pc), &ctx.from_usize(i));
-
-		Value::decode(
-			value,
-			&model,
-			value_type_config.decode_value_type(&ctx, &model, ty),
-			value_type_config,
-		)
-	};
-
-	assert_eq!(stack(1, 0), Value::I32(1));
-	assert_eq!(stack(2, 0), Value::I32(1));
-	assert_eq!(stack(2, 1), Value::I32(2));
-	assert_eq!(stack(3, 0), Value::I32(3));
+	assert_eq!(
+		execution.states[3].decode(&model, &constants),
+		State {
+			stack: vec![Value::I32(3)],
+			locals: vec![],
+			trapped: false,
+		}
+	);
 }
 
 fn consts_add(c: &mut Criterion) {

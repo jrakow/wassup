@@ -555,7 +555,15 @@ mod tests {
 			i32_size: 32,
 			i64_size: Some(64),
 		};
-		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
+		let constants = Constants::new(
+			&ctx,
+			&solver,
+			vec![],
+			vec![],
+			vec![],
+			&[],
+			value_type_config,
+		);
 
 		assert!(solver.check());
 		let model = solver.get_model();

@@ -1,5 +1,4 @@
-use crate::instructions::*;
-use crate::ValueTypeConfig;
+use crate::{instructions::*, ValueTypeConfig};
 use parity_wasm::elements::ValueType;
 use z3::*;
 
@@ -8,8 +7,8 @@ pub struct Constants<'ctx> {
 	pub ctx: &'ctx Context,
 	/// Values of the initial stack
 	pub initial_stack: Vec<Ast<'ctx>>,
-	/// Z3 constants used in initial_stack
-	pub initial_stack_bounds: Vec<Ast<'ctx>>,
+	/// Z3 constants used for forall quantifiers
+	pub bounds: Vec<Ast<'ctx>>,
 	pub initial_stack_types: Vec<Ast<'ctx>>,
 	pub initial_locals: Vec<Ast<'ctx>>,
 	pub n_locals: Ast<'ctx>,
@@ -20,6 +19,7 @@ impl<'ctx> Constants<'ctx> {
 	pub fn new(
 		ctx: &'ctx Context,
 		solver: &Solver<'ctx>,
+		mut bounds: Vec<Ast<'ctx>>,
 		initial_locals: Vec<Ast<'ctx>>,
 		local_types: Vec<ValueType>,
 		initial_stack_types: &[ValueType],
@@ -49,10 +49,11 @@ impl<'ctx> Constants<'ctx> {
 			}
 		}
 
+		bounds.extend_from_slice(&initial_stack_bounds);
 		let this = Self {
 			ctx,
 			initial_stack,
-			initial_stack_bounds,
+			bounds,
 			initial_stack_types: encoded_initial_stack_types,
 			initial_locals,
 			n_locals: ctx.from_usize(local_types.len()),

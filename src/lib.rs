@@ -94,31 +94,38 @@ pub fn superoptimize_snippet(
 		let constants = Constants::new(
 			&ctx,
 			&solver,
+			initial_locals_bounds.clone(),
 			initial_locals,
 			local_types.to_vec(),
 			&initial_stack,
 			value_type_config,
 		);
-
 		let target_length = source_program.len() - 1;
 
-		let source_state = State::new(&ctx, &solver, &constants, "source_", source_program.len());
-		let target_state = State::new(&ctx, &solver, &constants, "target_", target_length);
-		source_state.set_source_program(&source_program[..]);
+		let source_execution = Execution::new(
+			&constants,
+			&solver,
+			"source_".to_owned(),
+			Either::Left(source_program),
+		);
+		let source_state = &source_execution.states[source_program.len()];
+		let target_execution = Execution::new(
+			&constants,
+			&solver,
+			"target_".to_owned(),
+			Either::Right(target_length),
+		);
+		let target_state = &source_execution.states[target_length];
 
-		let initial_locals_bounds: Vec<&Ast> = initial_locals_bounds.iter().collect();
-		solver.assert(&ctx.forall_const(&initial_locals_bounds, &source_state.transitions()));
-		solver.assert(&ctx.forall_const(&initial_locals_bounds, &target_state.transitions()));
-
-
-		// assert programs are equivalent for all local variables
+		let bounds: Vec<_> = constants.bounds.iter().collect();
+		// assert programs are equivalent for all inputs
 		solver.assert(&ctx.forall_const(
-			&initial_locals_bounds,
+			&bounds,
 			&equivalent(
+				&ctx,
 				&source_state,
-				&ctx.from_usize(source_program.len()),
 				&target_state,
-				&ctx.from_usize(target_length),
+				&ctx.from_usize(local_types.len()),
 			),
 		));
 
@@ -131,7 +138,7 @@ pub fn superoptimize_snippet(
 		// decode
 
 		let model = solver.get_model();
-		current_best = target_state.decode_program(&model);
+		current_best = target_execution.decode_program(&model);
 
 		//		solver.pop(1);
 	}

@@ -1,6 +1,10 @@
+use either::Either;
 use parity_wasm::elements::{Internal, Module, Type, ValueType};
 use std::{collections::HashMap, fs::read};
-use wabt::script::{Action, Action::*, Command, CommandKind, ScriptParser, Value as ScriptValue};
+use wabt::script::{
+	Action::{self, *},
+	Command, CommandKind, ScriptParser, Value as ScriptValue,
+};
 use wassup_encoding::*;
 use z3::*;
 
@@ -81,10 +85,6 @@ fn action_result(
 				return None;
 			}
 
-			let instr = body.code().elements();
-			// slice of last End
-			let instr = &instr[..instr.len() - 1];
-
 			let ctx = Context::new(&Config::default());
 			let solver = Solver::new(&ctx);
 			let value_type_config = ValueTypeConfig {
@@ -116,38 +116,28 @@ fn action_result(
 			let constants = Constants::new(
 				&ctx,
 				&solver,
+				vec![],
 				initial_locals,
 				function.local_types.clone(),
 				&[],
 				value_type_config,
 			);
 			let source_program = function.instructions[0].as_ref().left().unwrap();
-			let state = State::new(&ctx, &solver, &constants, "", source_program.len());
-
-			state.set_source_program(source_program);
-			solver.assert(&state.transitions());
+			let execution = Execution::new(
+				&constants,
+				&solver,
+				"".to_owned(),
+				Either::Left(source_program),
+			);
 
 			assert!(solver.check());
 			let model = solver.get_model();
 
-			let pc = ctx.from_usize(instr.len());
-			let sp = model
-				.eval(&state.stack_pointer(&pc))
-				.unwrap()
-				.as_usize()
-				.unwrap();
-			if sp > 0 {
-				let sp = state.stack_pointer(&pc).sub(&[&ctx.from_u64(1)]);
-				let i = Value::decode(
-					&state.stack(&pc, &sp),
-					&model,
-					value_type_config.decode_value_type(&ctx, &model, &state.stack_type(&pc, &sp)),
-					value_type_config,
-				);
-				Some(vec![i])
-			} else {
-				None
-			}
+			Some(
+				execution.states[source_program.len()]
+					.decode(&model, &constants)
+					.stack,
+			)
 		}
 		// TODO trapped tests
 		_ => panic!(),

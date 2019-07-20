@@ -1,5 +1,4 @@
-use crate::instructions::Instruction;
-use crate::Value;
+use crate::{instructions::Instruction, Value};
 use either::Either;
 use parity_wasm::elements::{
 	FuncBody, Instruction as PInstruction, Instructions, Local, ValueType,
