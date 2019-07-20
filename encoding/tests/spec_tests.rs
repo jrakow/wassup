@@ -121,9 +121,10 @@ fn action_result(
 				&[],
 				value_type_config,
 			);
-			let state = State::new(&ctx, &solver, &constants, "");
+			let source_program = function.instructions[0].as_ref().left().unwrap();
+			let state = State::new(&ctx, &solver, &constants, "", source_program.len());
 
-			state.set_source_program(&function.instructions[0].as_ref().left().unwrap());
+			state.set_source_program(source_program);
 			solver.assert(&state.transitions());
 
 			assert!(solver.check());

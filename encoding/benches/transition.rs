@@ -11,7 +11,7 @@ fn transition_consts_add(source: &[Instruction]) {
 		i64_size: Some(64),
 	};
 	let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-	let state = State::new(&ctx, &solver, &constants, "");
+	let state = State::new(&ctx, &solver, &constants, "", source.len());
 
 	state.set_source_program(source);
 

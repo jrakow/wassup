@@ -7,6 +7,7 @@ pub struct State<'ctx, 'solver, 'constants> {
 	pub solver: &'solver Solver<'ctx>,
 	pub constants: &'constants Constants<'ctx>,
 	pub prefix: String,
+	pub program_length: usize,
 }
 
 impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
@@ -15,12 +16,14 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 		solver: &'solver Solver<'ctx>,
 		constants: &'constants Constants<'ctx>,
 		prefix: &str,
+		program_length: usize,
 	) -> Self {
 		let state = State {
 			ctx,
 			solver,
 			constants,
 			prefix: prefix.to_string(),
+			program_length,
 		};
 
 		state.set_initial();
@@ -88,6 +91,8 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 	}
 
 	pub fn set_source_program(&self, program: &[Instruction]) {
+		assert_eq!(program.len(), self.program_length);
+
 		for (pc, instruction) in program.iter().enumerate() {
 			let pc = self.ctx.from_usize(pc);
 
@@ -98,25 +103,12 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 					._eq(&instruction.encode(self.ctx, self.constants.value_type_config)),
 			);
 		}
-
-		// set program_length
-		self.solver.assert(
-			&self
-				.program_length()
-				._eq(&self.ctx.from_usize(program.len())),
-		);
 	}
 
 	pub fn decode_program(&self, model: &Model) -> Vec<Instruction> {
-		let program_length = model
-			.eval(&self.program_length())
-			.unwrap()
-			.as_usize()
-			.unwrap();
+		let mut program = Vec::new();
 
-		let mut program = Vec::with_capacity(program_length);
-
-		for pc in 0..program_length {
+		for pc in 0..self.program_length {
 			let pc = self.ctx.from_usize(pc);
 			let encoded_instr = model.eval(&self.program(&pc)).unwrap();
 
@@ -135,7 +127,7 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 	pub fn transitions(&self) -> Ast<'ctx> {
 		let pc = self.ctx.named_int_const("pc");
-		let pc_in_range = in_range(&self.ctx.from_usize(0), &pc, &self.program_length());
+		let pc_in_range = in_range(&self.ctx.from_usize(0), &pc, &self.ctx.from_usize(self.program_length));
 
 		// forall initial_stack values and all params and all pcs
 		let mut bounds: Vec<_> = self.constants.initial_stack_bounds.iter().collect();
@@ -523,11 +515,6 @@ impl<'ctx, 'solver, 'constants> State<'ctx, 'solver, 'constants> {
 
 		trapped_func.apply(&[pc])
 	}
-
-	pub fn program_length(&self) -> Ast<'ctx> {
-		self.ctx
-			.named_int_const(&(self.prefix.to_owned() + "program_length"))
-	}
 }
 
 #[cfg(test)]
@@ -548,7 +535,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 4);
 
 		state.set_source_program(program);
 
@@ -578,7 +565,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 3);
 
 		state.set_source_program(program);
 
@@ -602,7 +589,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 3);
 
 		state.set_source_program(program);
 
@@ -633,7 +620,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 2);
 
 		state.set_source_program(program);
 
@@ -655,7 +642,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 1);
 
 		state.set_source_program(program);
 
@@ -696,7 +683,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 4);
 
 		state.set_source_program(program);
 
@@ -735,7 +722,7 @@ mod tests {
 			i64_size: None,
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 4);
 
 		state.set_source_program(program);
 
@@ -774,7 +761,7 @@ mod tests {
 			i64_size: Some(16),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 4);
 
 		state.set_source_program(program);
 
@@ -820,7 +807,7 @@ mod tests {
 			&[ValueType::I32, ValueType::I32],
 			value_type_config,
 		);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 1);
 
 		state.set_source_program(program);
 
@@ -863,7 +850,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 2);
 		state.set_source_program(program);
 		solver.assert(&state.transitions());
 
@@ -892,7 +879,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 4);
 		state.set_source_program(program);
 		solver.assert(&state.transitions());
 
@@ -934,7 +921,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 4);
 		state.set_source_program(program);
 		solver.assert(&state.transitions());
 
@@ -1003,7 +990,7 @@ mod tests {
 			value_type_config,
 		);
 
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 8);
 		state.set_source_program(program);
 
 		solver.assert(&constants.n_locals._eq(&ctx.from_usize(3)));
@@ -1084,7 +1071,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 2);
 		state.set_source_program(program);
 
 		solver.assert(&state.transitions());
@@ -1117,7 +1104,7 @@ mod tests {
 			i64_size: Some(64),
 		};
 		let constants = Constants::new(&ctx, &solver, vec![], vec![], &[], value_type_config);
-		let state = State::new(&ctx, &solver, &constants, "");
+		let state = State::new(&ctx, &solver, &constants, "", 3);
 		state.set_source_program(program);
 
 		solver.assert(&state.transitions());

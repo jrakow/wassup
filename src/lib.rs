@@ -100,22 +100,16 @@ pub fn superoptimize_snippet(
 			value_type_config,
 		);
 
-		let source_state = State::new(&ctx, &solver, &constants, "source_");
-		let target_state = State::new(&ctx, &solver, &constants, "target_");
+		let target_length = source_program.len() - 1;
+
+		let source_state = State::new(&ctx, &solver, &constants, "source_", source_program.len());
+		let target_state = State::new(&ctx, &solver, &constants, "target_", target_length);
 		source_state.set_source_program(&source_program[..]);
 
 		let initial_locals_bounds: Vec<&Ast> = initial_locals_bounds.iter().collect();
 		solver.assert(&ctx.forall_const(&initial_locals_bounds, &source_state.transitions()));
 		solver.assert(&ctx.forall_const(&initial_locals_bounds, &target_state.transitions()));
 
-		let target_length = &target_state.program_length();
-
-		// force target program to be shorter than current best
-		solver.assert(&in_range(
-			&ctx.from_u64(0),
-			target_length,
-			&ctx.from_usize(current_best.len()),
-		));
 
 		// assert programs are equivalent for all local variables
 		solver.assert(&ctx.forall_const(
@@ -124,7 +118,7 @@ pub fn superoptimize_snippet(
 				&source_state,
 				&ctx.from_usize(source_program.len()),
 				&target_state,
-				&target_length,
+				&ctx.from_usize(target_length),
 			),
 		));
 
