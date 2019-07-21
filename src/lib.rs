@@ -63,13 +63,12 @@ pub fn superoptimize_snippet(
 	let mut current_best = source_program.to_vec();
 
 	loop {
-		//		solver.push();
 		let config = Config::default();
 		let ctx = Context::new(&config);
 		let solver = Solver::new(&ctx);
 
 		// TODO compute actual stack types
-		let initial_stack = vec![ValueType::I32; stack_depth(&source_program[..])];
+		let initial_stack = vec![ValueType::I32; stack_depth(&current_best[..])];
 
 		let mut initial_locals = Vec::new();
 		let mut initial_locals_bounds = Vec::new();
@@ -100,22 +99,22 @@ pub fn superoptimize_snippet(
 			&initial_stack,
 			value_type_config,
 		);
-		let target_length = source_program.len() - 1;
+		let target_length = current_best.len() - 1;
 
 		let source_execution = Execution::new(
 			&constants,
 			&solver,
 			"source_".to_owned(),
-			Either::Left(source_program),
+			Either::Left(&current_best),
 		);
-		let source_state = &source_execution.states[source_program.len()];
+		let source_state = &source_execution.states[current_best.len()];
 		let target_execution = Execution::new(
 			&constants,
 			&solver,
 			"target_".to_owned(),
 			Either::Right(target_length),
 		);
-		let target_state = &source_execution.states[target_length];
+		let target_state = &target_execution.states[target_length];
 
 		let bounds: Vec<_> = constants.bounds.iter().collect();
 		// assert programs are equivalent for all inputs
@@ -140,7 +139,9 @@ pub fn superoptimize_snippet(
 		let model = solver.get_model();
 		current_best = target_execution.decode_program(&model);
 
-		//		solver.pop(1);
+		if current_best.is_empty() {
+			return current_best;
+		}
 	}
 }
 
@@ -151,7 +152,6 @@ mod tests {
 	use Value::*;
 
 	#[test]
-	#[ignore]
 	fn superoptimize_nop() {
 		let source_program = &[Nop];
 		let target = superoptimize_snippet(
@@ -166,7 +166,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
 	fn superoptimize_const_nop() {
 		let source_program = &[Const(I32(1)), Nop];
 		let target = superoptimize_snippet(
@@ -181,7 +180,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
 	fn superoptimize_consts_add() {
 		let source_program = &[Const(I32(1)), Const(I32(2)), I32Add];
 		let target = superoptimize_snippet(
@@ -196,7 +194,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
 	fn superoptimize_consts_add_64bit() {
 		let source_program = &[Const(I64(1)), Const(I64(2)), I64Add];
 		let target = superoptimize_snippet(
@@ -211,7 +208,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
 	fn superoptimize_add0() {
 		let source_program = &[Const(I32(0)), I32Add];
 		let target = superoptimize_snippet(
@@ -242,7 +238,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore] // TODO
 	fn superoptimize_unreachable_garbage() {
 		let source_program = &[Unreachable, GetLocal(0)];
 		let target = superoptimize_snippet(
