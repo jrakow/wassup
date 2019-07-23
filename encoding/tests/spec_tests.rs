@@ -28,6 +28,11 @@ fn test_int_exprs() {
 	spec_test("int_exprs.wast")
 }
 
+#[test]
+fn test_conversions() {
+	spec_test("conversions.wast")
+}
+
 fn spec_test(name: &str) {
 	let source = read("tests/spec_tests/".to_owned() + name).unwrap();
 

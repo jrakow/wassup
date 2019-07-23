@@ -139,6 +139,7 @@ fn transition_stack<'ctx>(
 
 	// helpers
 	let i32_size = constants.value_type_config.i32_size;
+	let i64_size = constants.value_type_config.i64_size;
 	let bool_to_i32 = |b: &Ast<'ctx>| {
 		b.ite(
 			&to_i32(&ctx.from_usize(1).int2bv(i32_size as u64)),
@@ -197,7 +198,10 @@ fn transition_stack<'ctx>(
 				let index = variant.accessors[0].apply(&[&instr]);
 				let ty = constants.local_type(&index);
 				op_type(1)._eq(&ty)
-			}
+			},
+			// conversions
+			I32WrapI64 => op_type(1)._eq(&i64_type()),
+			I64ExtendSI32 | I64ExtendUI32 => op_type(1)._eq(&i32_type),
 
 			_ => ctx.from_bool(true),
 		};
@@ -223,6 +227,9 @@ fn transition_stack<'ctx>(
 				let ty = constants.local_type(&index);
 				result_type._eq(&ty)
 			}
+			// conversions
+			I32WrapI64 => result_type._eq(&i32_type),
+			I64ExtendSI32 | I64ExtendUI32 => result_type._eq(&i64_type()),
 
 			_ => ctx.from_bool(true),
 		};
@@ -367,6 +374,11 @@ fn transition_stack<'ctx>(
 			I64ShrU => result._eq(&op(2).bvlshr(&bvmod64(&op(1)))),
 			I64Rotl => result._eq(&op(2).bvrotl(&bvmod64(&op(1)))),
 			I64Rotr => result._eq(&op(2).bvrotr(&bvmod64(&op(1)))),
+
+			// conversions
+			I32WrapI64 => result._eq(&to_i32(&op(1).bvextract(i32_size - 1, 0))),
+			I64ExtendSI32 => result._eq(&as_i32(&op(1)).bvsignextend(i64_size.unwrap() - i32_size)),
+			I64ExtendUI32 => result._eq(&as_i32(&op(1)).bvzeroextend(i64_size.unwrap() - i32_size)),
 
 			Select => result._eq(&as_i32(&op(1))._eq(&bv32_zero).ite(&op(2), &op(3))),
 

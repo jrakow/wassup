@@ -162,14 +162,13 @@ pub enum Instruction {
 	// F64Min,
 	// F64Max,
 	// F64Copysign,
-
-	// I32WrapI64,
+	I32WrapI64,
 	// I32TruncSF32,
 	// I32TruncUF32,
 	// I32TruncSF64,
 	// I32TruncUF64,
-	// I64ExtendSI32,
-	// I64ExtendUI32,
+	I64ExtendSI32,
+	I64ExtendUI32,
 	// I64TruncSF32,
 	// I64TruncUF32,
 	// I64TruncSF64,
@@ -215,7 +214,10 @@ impl Instruction {
 			I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr |
 			// i64 binop
 			I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr
-			=> (2, 1)
+			=> (2, 1)                                 ,
+
+			// conversions
+			I32WrapI64 | I64ExtendSI32 | I64ExtendUI32 => (1, 1),
 		}
 	}
 
@@ -291,6 +293,10 @@ impl Instruction {
 			I64Rotl => Some(Instruction::I64Rotl),
 			I64Rotr => Some(Instruction::I64Rotr),
 
+			I32WrapI64 => Some(Instruction::I32WrapI64),
+			I64ExtendSI32 => Some(Instruction::I64ExtendSI32),
+			I64ExtendUI32 => Some(Instruction::I64ExtendUI32),
+
 			_ => None,
 		}
 	}
@@ -316,9 +322,35 @@ impl Instruction {
 
 		let i_64 = if value_type_config.i64_enabled() {
 			&[
-				I64Eqz, I64Eq, I64Ne, I64LtS, I64LtU, I64GtS, I64GtU, I64LeS, I64LeU, I64GeS,
-				I64GeU, I64Add, I64Sub, I64Mul, I64DivS, I64DivU, I64RemS, I64RemU, I64And, I64Or,
-				I64Xor, I64Shl, I64ShrS, I64ShrU, I64Rotl, I64Rotr,
+				I64Eqz,
+				I64Eq,
+				I64Ne,
+				I64LtS,
+				I64LtU,
+				I64GtS,
+				I64GtU,
+				I64LeS,
+				I64LeU,
+				I64GeS,
+				I64GeU,
+				I64Add,
+				I64Sub,
+				I64Mul,
+				I64DivS,
+				I64DivU,
+				I64RemS,
+				I64RemU,
+				I64And,
+				I64Or,
+				I64Xor,
+				I64Shl,
+				I64ShrS,
+				I64ShrU,
+				I64Rotl,
+				I64Rotr,
+				I32WrapI64,
+				I64ExtendSI32,
+				I64ExtendUI32,
 			][..]
 		} else {
 			&[]
@@ -485,6 +517,10 @@ impl From<Instruction> for PInstruction {
 			I64ShrU => PInstruction::I64ShrU,
 			I64Rotl => PInstruction::I64Rotl,
 			I64Rotr => PInstruction::I64Rotr,
+
+			I32WrapI64 => PInstruction::I32WrapI64,
+			I64ExtendSI32 => PInstruction::I64ExtendSI32,
+			I64ExtendUI32 => PInstruction::I64ExtendUI32,
 		}
 	}
 }

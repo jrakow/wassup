@@ -70,6 +70,10 @@ impl Function {
 						(vec![I64, I64], vec![I64])
 					}
 
+					// conversions
+					I32WrapI64 => (vec![I64], vec![I32]),
+					I64ExtendSI32 | I64ExtendUI32 => (vec![I32], vec![I64]),
+
 					// parametric
 					Drop => (vec![stack_type[stack_type.len() - 1]], vec![]),
 					Select => (
