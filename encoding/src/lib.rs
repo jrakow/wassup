@@ -9,7 +9,7 @@ pub use crate::{
 	constants::Constants,
 	execution::Execution,
 	function::Function,
-	instructions::{stack_depth, Instruction},
+	instructions::{initial_stack_types, Instruction},
 	state::State,
 };
 use parity_wasm::elements::ValueType;
@@ -221,27 +221,5 @@ impl ValueTypeConfig {
 		} else {
 			i.clone()
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use Instruction::*;
-	use Value::*;
-
-	#[test]
-	fn stack_depth_test() {
-		let program = &[];
-		assert_eq!(stack_depth(program), 0);
-
-		let program = &[I32Add];
-		assert_eq!(stack_depth(program), 2);
-
-		let program = &[Const(I32(1)), I32Add];
-		assert_eq!(stack_depth(program), 1);
-
-		let program = &[Const(I32(1)), Const(I32(1)), Const(I32(1)), I32Add];
-		assert_eq!(stack_depth(program), 0);
 	}
 }

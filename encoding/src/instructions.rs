@@ -1,5 +1,5 @@
 use crate::{Value, ValueTypeConfig};
-use parity_wasm::elements::Instruction as PInstruction;
+use parity_wasm::elements::{Instruction as PInstruction, ValueType};
 use z3::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -561,17 +561,99 @@ pub fn instruction_datatype(ctx: &Context, value_type_config: ValueTypeConfig) -
 	datatype.finish("Instruction")
 }
 
-/// How many words this instructions sequence assumes to be on the stack, when it starts executing.
-pub fn stack_depth(program: &[Instruction]) -> usize {
-	let mut stack_pointer: isize = 0;
-	let mut lowest: isize = 0;
-	for i in program {
-		let (pops, pushs) = i.stack_pop_push_count();
-		let (pops, pushs) = (pops as isize, pushs as isize);
-		lowest = std::cmp::min(lowest, stack_pointer - pops);
-		stack_pointer = stack_pointer - pops + pushs;
+// What types the program assumes to have on the stack
+//
+// This cannot be computed from just the snippet because of paramtric instructions.
+// This will panic on a select where the operand types is unknown.
+pub fn initial_stack_types(program: &[Instruction], local_types: &[ValueType]) -> Vec<ValueType> {
+	use Instruction::*;
+	use ValueType::*;
+
+	let mut initial_stack: Vec<ValueType> = Default::default();
+	let mut stack: Vec<ValueType> = Default::default();
+
+	for ins in program {
+		let (pops, pushs) = match ins {
+			// special case for parametric instructions
+			Drop => {
+				if stack.is_empty() {
+					// assume I32
+					initial_stack.push(I32);
+				} else {
+					stack.pop().unwrap();
+				}
+
+				continue;
+			}
+			Select => {
+				if stack.is_empty() {
+					initial_stack.push(I32);
+				} else {
+					stack.pop().unwrap();
+				}
+
+				if stack.is_empty() {
+					panic!(
+						"Insufficient information to compute stack types for snippet {:?}",
+						&program
+					);
+				} else if stack.len() == 1 {
+					// type of initial stack same as type of operand 1
+					initial_stack.push(stack.pop().unwrap())
+				} else {
+					stack.pop().unwrap();
+					stack.pop().unwrap();
+				}
+
+				continue;
+			}
+
+			// normal cases
+			Unreachable => (vec![], vec![]),
+			Nop => (vec![], vec![]),
+
+			Const(Value::I32(_)) => (vec![], vec![I32]),
+			Const(Value::I64(_)) => (vec![], vec![I64]),
+			Const(_) => unimplemented!(),
+
+			// itestop
+			I32Eqz => (vec![I32], vec![I32]),
+			I64Eqz => (vec![I64], vec![I64]),
+			// irelop
+			I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS
+			| I32GeU => (vec![I32, I32], vec![I32]),
+			I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS
+			| I64GeU => (vec![I64, I64], vec![I32]),
+			// ibinop
+			I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
+			| I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => (vec![I32, I32], vec![I32]),
+			I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or
+			| I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr => (vec![I64, I64], vec![I64]),
+
+			// conversions
+			I32WrapI64 => (vec![I64], vec![I32]),
+			I64ExtendSI32 | I64ExtendUI32 => (vec![I32], vec![I64]),
+
+			// locals
+			GetLocal(i) => (vec![], vec![local_types[*i as usize]]),
+			SetLocal(i) => (vec![local_types[*i as usize]], vec![]),
+			TeeLocal(i) => (
+				vec![local_types[*i as usize]],
+				vec![local_types[*i as usize]],
+			),
+		};
+
+		for ty in pops {
+			if stack.is_empty() {
+				initial_stack.push(ty);
+			} else {
+				stack.pop().unwrap();
+			}
+		}
+		stack.extend(pushs);
 	}
-	lowest.abs() as usize
+
+	initial_stack
 }
 
 #[cfg(test)]
@@ -642,6 +724,44 @@ mod tests {
 					.stack_push_count(&Instruction::Const(I32(0)).encode(&ctx, value_type_config))
 			),
 			1
+		);
+	}
+
+	#[test]
+	fn test_initial_stack_types() {
+		use Instruction::*;
+		use ValueType::*;
+
+		assert_eq!(&initial_stack_types(&[], &[]), &[],);
+
+		assert_eq!(
+			&initial_stack_types(&[Const(Value::I32(0)), Const(Value::I32(1)), I32Add], &[]),
+			&[],
+		);
+
+		assert_eq!(
+			&initial_stack_types(&[Const(Value::I32(0)), I32Add], &[]),
+			&[I32],
+		);
+
+		assert_eq!(
+			&initial_stack_types(&[Const(Value::I64(0)), Const(Value::I32(0)), Select], &[]),
+			&[I64],
+		);
+
+		assert_eq!(
+			&initial_stack_types(&[Const(Value::I32(0)), I64ExtendUI32, I64Add], &[]),
+			&[I64],
+		);
+
+		assert_eq!(
+			&initial_stack_types(&[Const(Value::I64(0)), I32WrapI64, I32Add], &[]),
+			&[I32],
+		);
+
+		assert_eq!(
+			&initial_stack_types(&[SetLocal(0), TeeLocal(1)], &[I32, I64]),
+			&[I32, I64],
 		);
 	}
 }
