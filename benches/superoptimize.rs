@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, ParameterizedBenchmark};
 use wassup::superoptimize_snippet;
 use wassup_encoding::{Instruction::*, Value::*, ValueTypeConfig};
 
@@ -19,7 +19,7 @@ fn const0_add(c: &mut Criterion) {
 				)
 			})
 		},
-		std::iter::once(1).chain((4..=32).step_by(4)),
+		1..=32,
 	);
 
 	c.bench_function_over_inputs(
@@ -38,50 +38,79 @@ fn const0_add(c: &mut Criterion) {
 				)
 			})
 		},
-		std::iter::once(1).chain((4..=32).step_by(4)),
+		1..=32,
 	);
 }
 
 fn eqz_repeated(c: &mut Criterion) {
-	c.bench_function_over_inputs(
-		"eqz_repeated_i32",
-		|b, n: &usize| {
-			b.iter(|| {
-				let mut source = Vec::new();
-				source.resize(*n, I32Eqz);
+	//	c.bench_function_over_inputs(
+	//		"eqz_repeated_i32",
+	//		|b, n: &usize| {
+	//			b.iter(|| {
+	//				let mut source = Vec::new();
+	//				source.resize(*n, I32Eqz);
+	//
+	//				superoptimize_snippet(
+	//					black_box(&source),
+	//					&[],
+	//					ValueTypeConfig {
+	//						i32_size: 32,
+	//						i64_size: None,
+	//					},
+	//				)
+	//			})
+	//		},
+	//		1..10,
+	//	);
 
-				superoptimize_snippet(
-					black_box(&source),
-					&[],
-					ValueTypeConfig {
-						i32_size: 32,
-						i64_size: None,
-					},
-				)
-			})
-		},
-		1..10,
+	c.bench(
+		"eqz_repeated_i32",
+		ParameterizedBenchmark::new(
+			"eqz_repeated_i32",
+			|b, n: &usize| {
+				b.iter(|| {
+					let mut source = Vec::new();
+					source.resize(*n, I32Eqz);
+
+					superoptimize_snippet(
+						black_box(&source),
+						&[],
+						ValueTypeConfig {
+							i32_size: 4,
+							i64_size: None,
+						},
+					)
+				})
+			},
+			1..10,
+		)
+		.sample_size(2)
+		.warm_up_time(std::time::Duration::from_nanos(1)),
 	);
 
-	c.bench_function_over_inputs(
+	c.bench(
 		"eqz_repeated_mixed",
-		|b, n: &usize| {
-			b.iter(|| {
-				let mut source = Vec::new();
-				source.resize(*n, I32Eqz);
-				dbg!(*n, &source);
+		ParameterizedBenchmark::new(
+			"eqz_repeated_mixed",
+			|b, n: &usize| {
+				b.iter(|| {
+					let mut source = Vec::new();
+					source.resize(*n, I32Eqz);
 
-				superoptimize_snippet(
-					black_box(&source),
-					&[],
-					ValueTypeConfig {
-						i32_size: 32,
-						i64_size: Some(64),
-					},
-				)
-			})
-		},
-		1..10,
+					superoptimize_snippet(
+						black_box(&source),
+						&[],
+						ValueTypeConfig {
+							i32_size: 32,
+							i64_size: Some(64),
+						},
+					)
+				})
+			},
+			1..10,
+		)
+		.sample_size(2)
+		.warm_up_time(std::time::Duration::from_nanos(1)),
 	);
 }
 
@@ -121,7 +150,7 @@ fn const_nop(c: &mut Criterion) {
 
 criterion_group! {
 	name = benches;
-	config = Criterion::default().sample_size(10);
+	config = Criterion::default().sample_size(20);
 	targets = const0_add, consts_add, const_nop, eqz_repeated,
 }
 criterion_main!(benches);

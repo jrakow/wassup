@@ -24,3 +24,7 @@ wabt = "0.7.4"
 [[bench]]
 name = "superoptimize"
 harness = false
+
+[[bench]]
+name = "superoptimize_length"
+harness = false
