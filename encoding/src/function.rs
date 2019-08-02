@@ -1,4 +1,4 @@
-use crate::{instructions::Instruction, Value};
+use crate::instructions::Instruction;
 use either::Either;
 use parity_wasm::elements::{
 	FuncBody, Instruction as PInstruction, Instructions, Local, ValueType,
@@ -23,9 +23,6 @@ pub struct Function {
 impl Function {
 	/// Create a function
 	pub fn from_wasm_func_body_params(body: &FuncBody, params: &[ValueType]) -> Self {
-		use Instruction::*;
-		use ValueType::*;
-
 		let local_types = {
 			let mut v = params.to_vec();
 			for l in body.locals() {
@@ -37,71 +34,14 @@ impl Function {
 		};
 		let wasm_instructions = body.code().elements();
 
-		// stack type in each execution step
-		// start with empty stack
-		let mut stack_type: Vec<ValueType> = Vec::new();
-
-		let mut instructions = Vec::new();
-		for wasm_instruction in wasm_instructions.iter() {
-			let either = if let Some(ins) = Instruction::try_convert(wasm_instruction) {
-				let (pops, pushs): (Vec<ValueType>, Vec<ValueType>) = match ins {
-					Unreachable => (vec![], vec![]),
-					Nop => (vec![], vec![]),
-
-					Const(Value::I32(_)) => (vec![], vec![I32]),
-					Const(Value::I64(_)) => (vec![], vec![I64]),
-					Const(_) => unimplemented!(),
-
-					// itestop
-					I32Eqz => (vec![I32], vec![I32]),
-					I64Eqz => (vec![I64], vec![I64]),
-					// irelop
-					I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU
-					| I32GeS | I32GeU => (vec![I32, I32], vec![I32]),
-					I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU
-					| I64GeS | I64GeU => (vec![I64, I64], vec![I32]),
-					// ibinop
-					I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And
-					| I32Or | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => {
-						(vec![I32, I32], vec![I32])
-					}
-					I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And
-					| I64Or | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr => {
-						(vec![I64, I64], vec![I64])
-					}
-
-					// conversions
-					I32WrapI64 => (vec![I64], vec![I32]),
-					I64ExtendSI32 | I64ExtendUI32 => (vec![I32], vec![I64]),
-
-					// parametric
-					Drop => (vec![stack_type[stack_type.len() - 1]], vec![]),
-					Select => (
-						vec![
-							stack_type[stack_type.len() - 2],
-							stack_type[stack_type.len() - 3],
-							I32,
-						],
-						vec![stack_type[stack_type.len() - 2]],
-					),
-
-					// locals
-					GetLocal(i) => (vec![], vec![local_types[i as usize]]),
-					SetLocal(i) => (vec![local_types[i as usize]], vec![]),
-					TeeLocal(i) => (vec![local_types[i as usize]], vec![local_types[i as usize]]),
-				};
-				for _ in pops {
-					stack_type.pop().unwrap();
-				}
-				stack_type.extend(pushs);
-
-				Either::Left(ins)
-			} else {
-				// TODO change stack types
-				Either::Right(wasm_instruction.clone())
-			};
-			instructions.push(either);
-		}
+		let instructions: Vec<_> = wasm_instructions
+			.iter()
+			.map(|i| {
+				Instruction::try_convert(i)
+					.map(Either::Left)
+					.unwrap_or(Either::Right(i.clone()))
+			})
+			.collect();
 
 		// Gather encodable instructions into vector
 		let instructions = gather_encodable_instructions(&instructions);
@@ -189,8 +129,8 @@ fn gather_locals(local_types: &[ValueType]) -> Vec<Local> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::Value::*;
 	use parity_wasm::elements::Instructions;
-	use Value::*;
 
 	#[test]
 	fn convert_test() {
