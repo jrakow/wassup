@@ -250,4 +250,218 @@ mod tests {
 		);
 		assert_eq!(target, vec![Unreachable]);
 	}
+
+	#[test]
+	#[ignore] // TODO
+	fn superoptimize_eqz() {
+		let source_program = &[I32Eqz, I32Eqz];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![]);
+
+		let source_program = &[I32Eqz, I32Eqz, I32Eqz];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![I32Eqz]);
+	}
+
+	#[test]
+	fn superoptimize_trapped() {
+		let source_program = &[Const(I32(0)), I32Add, Const(I32(0)), Const(I32(3)), I32DivU];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![Unreachable]);
+	}
+
+	#[test]
+	#[ignore]
+	fn superoptimize_int_extend() {
+		let source_program = &[Const(I32(42)), I64ExtendUI32, I64Add];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![Const(I64(42)), I64Add]);
+	}
+
+	#[test]
+	#[ignore]
+	fn superoptimize_int_wrap() {
+		let source_program = &[Const(I64(42)), I32WrapI64, I32Add];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![Const(I32(42)), I32Add]);
+	}
+
+	// Increasing number of initial stack values:
+	// ```
+	// EQZ EQZ EQZ EQZ EQZ
+	// EQ  EQZ EQZ EQZ EQZ
+	// EQ  EQ  EQZ EQZ EQZ
+	// ...
+	// EQ  EQ  EQ  EQ  EQ
+	// ```
+	// Maybe similar for initial local variables
+
+	#[test]
+	fn superoptimize_drop() {
+		let source_program = &[GetLocal(0), Drop];
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![]);
+	}
+
+	#[test]
+	#[ignore]
+	fn superoptimize_locals() {
+		let source_program = &[GetLocal(0), GetLocal(0), I32Eq];
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![Const(I32(1))]);
+
+		let source_program = &[TeeLocal(0), SetLocal(0)];
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![SetLocal(0)]);
+
+		let source_program = &[SetLocal(0), GetLocal(0)];
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![TeeLocal(0)]);
+
+		let source_program = &[GetLocal(0), SetLocal(0)];
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![]);
+	}
+
+	// TODO Example: Optimize out redundant computation with local variable. Overwrite local variable at the end to avoid adding a local.
+
+	// TODO
+	// Shift example (check cost function otherwise just equivalence):
+	// ```
+	// (i32.const 2) (i32.mul)
+	// ```
+	// to
+	// ```
+	// (i32.const 1) (i32.shl)
+	// ```
+
+	// TODO
+	// ```
+	// (i32.const 0)
+	// (i32.sub)
+	// ```
+	// to
+	// ```
+	// unary- / epsilon
+	// ```
+
+	#[test]
+	#[ignore]
+	fn superoptimize_arithmetic() {
+		// 3 + (x - 0)
+		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 32,
+				i64_size: Some(64),
+			},
+		);
+		assert_eq!(target, vec![Const(I32(3)), I32Sub]);
+	}
+
+	// #[test]
+	// fn superoptimize_biguint() {
+	// 	// TODO
+	// 	// convert_i64(a, b) + convert_i64(c, d)
+	// 	let source_program = &[
+	// 		// convert_i64(a, b)
+	// 		GetLocal(0), I64ExtendUI32, Const(I64(32)), I64Shl, GetLocal(1), I64ExtendUI32, I64Add,
+	// 		// convert_i64(c, d)
+	// 		GetLocal(2), I64ExtendUI32, Const(I64(32)), I64Shl, GetLocal(3), I64ExtendUI32, I64Add,
+	// 		// +
+	// 		I64Add
+	// 	];
+	// 	let target = superoptimize_snippet(
+	// 		source_program,
+	// 		&[ValueType::I32; 4],
+	// 		ValueTypeConfig {
+	// 			i32_size: 32,
+	// 			i64_size: Some(64),
+	// 		},
+	// 	);
+	// 	// convert_i64(a + c, b + d)
+	// 	// TODO not equivalent, because b + d can overflow
+	// 	assert_eq!(target, vec![
+	// 		// a + c
+	// 		GetLocal(0), GetLocal(2), I32Add, I64ExtendUI32, Const(I64(32)), I64Shl,
+	// 		// b + d
+	// 		GetLocal(1), GetLocal(3), I32Add,
+	// 		// if b + d overflowed (b + d < b), add 1 to a + c
+	// 		GetLocal(1), I64LtU,
+	//
+	// 		// FIXME
+	// 	]);
+	// }
 }
