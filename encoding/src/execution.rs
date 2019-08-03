@@ -46,7 +46,6 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 		// initialize
 		let initial_state = &this.states[0];
 
-		// TODO forall quantify
 		// set trapped = false
 		solver.assert(&initial_state.trapped().not());
 
