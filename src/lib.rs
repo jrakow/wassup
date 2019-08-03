@@ -92,7 +92,7 @@ pub fn superoptimize_snippet(
 		let constants = Constants::new(
 			&ctx,
 			&solver,
-			initial_locals_bounds.clone(),
+			initial_locals_bounds,
 			initial_locals,
 			local_types.to_vec(),
 			&initial_stack,
