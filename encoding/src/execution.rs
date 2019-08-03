@@ -8,7 +8,7 @@ pub struct Execution<'ctx, 'constants> {
 	ctx: &'ctx Context,
 	constants: &'constants Constants<'ctx>,
 	program: Vec<Ast<'ctx>>,
-	pub states: Vec<EncodedState<'ctx>>,
+	pub states: Vec<EncodedState<'ctx, 'constants>>,
 }
 
 impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
@@ -93,11 +93,11 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 	}
 }
 
-fn transition<'ctx>(
+fn transition<'ctx, 'constants>(
 	ctx: &'ctx Context,
-	constants: &Constants<'ctx>,
-	state: &EncodedState<'ctx>,
-	next_state: &EncodedState<'ctx>,
+	constants: &'constants Constants<'ctx>,
+	state: &EncodedState<'ctx, 'constants>,
+	next_state: &EncodedState<'ctx, 'constants>,
 	instr: &Ast<'ctx>,
 ) -> Ast<'ctx> {
 	transition_stack(ctx, constants, state, next_state, instr).and(&[&transition_stack_pointer(
@@ -105,10 +105,10 @@ fn transition<'ctx>(
 	)])
 }
 
-fn transition_stack_pointer<'ctx>(
+fn transition_stack_pointer<'ctx, 'constants>(
 	constants: &Constants<'ctx>,
-	state: &EncodedState<'ctx>,
-	next_state: &EncodedState<'ctx>,
+	state: &EncodedState<'ctx, 'constants>,
+	next_state: &EncodedState<'ctx, 'constants>,
 	instr: &Ast<'ctx>,
 ) -> Ast<'ctx> {
 	// encode stack_pointer change
@@ -123,11 +123,11 @@ fn transition_stack_pointer<'ctx>(
 	stack_pointer_next._eq(&new_pointer)
 }
 
-fn transition_stack<'ctx>(
+fn transition_stack<'ctx, 'constants>(
 	ctx: &'ctx Context,
 	constants: &Constants<'ctx>,
-	state: &EncodedState<'ctx>,
-	next_state: &EncodedState<'ctx>,
+	state: &EncodedState<'ctx, 'constants>,
+	next_state: &EncodedState<'ctx, 'constants>,
 	instr: &Ast<'ctx>,
 ) -> Ast<'ctx> {
 	use Instruction::*;

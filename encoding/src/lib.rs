@@ -23,10 +23,10 @@ pub fn in_range<'ctx>(a: &Ast<'ctx>, b: &Ast<'ctx>, c: &Ast<'ctx>) -> Ast<'ctx> 
 /// Whether state `lhs` is equivalent to state `rhs`
 ///
 /// This expression contains quantifiers and cannot be tested directly as Z3 does not support evaluating terms with quantifiers.
-pub fn equivalent<'ctx>(
+pub fn equivalent<'ctx, 'constants>(
 	ctx: &'ctx Context,
-	lhs: &EncodedState<'ctx>,
-	rhs: &EncodedState<'ctx>,
+	lhs: &EncodedState<'ctx, 'constants>,
+	rhs: &EncodedState<'ctx, 'constants>,
 	n_locals: &Ast<'ctx>,
 ) -> Ast<'ctx> {
 	let stack_pointers_equal = lhs.stack_pointer()._eq(&rhs.stack_pointer());

@@ -8,69 +8,94 @@ pub struct State {
 	pub trapped: bool,
 }
 
-pub struct EncodedState<'ctx> {
+pub struct EncodedState<'ctx, 'constants> {
 	ctx: &'ctx Context,
+	constants: &'constants Constants<'ctx>,
 	n_locals: usize,
-	stack_pointer: Ast<'ctx>,
+	stack_pointer: FuncDecl<'ctx>,
 	stack_func: FuncDecl<'ctx>,
 	stack_type_func: FuncDecl<'ctx>,
 	local_func: FuncDecl<'ctx>,
-	trapped: Ast<'ctx>,
+	trapped: FuncDecl<'ctx>,
 }
 
-impl<'ctx> EncodedState<'ctx> {
+impl<'ctx, 'constants> EncodedState<'ctx, 'constants> {
 	pub fn new(
 		ctx: &'ctx Context,
-		constants: &Constants<'ctx>,
+		constants: &'constants Constants<'ctx>,
 		prefix: String,
 		suffix: String,
 	) -> Self {
+		let domain: Vec<Sort<'ctx>> = constants.bounds.iter().map(Ast::sort).collect();
+		let domain: Vec<&Sort<'ctx>> = domain.iter().collect();
+		let mut domain_int = domain.clone();
+		let int_sort = ctx.int_sort();
+		domain_int.push(&int_sort);
+
 		Self {
 			ctx,
+			constants,
 			n_locals: constants.initial_locals.len(),
-			stack_pointer: ctx.named_int_const(&format!("{}stack_pointer{}", prefix, suffix)),
+			stack_pointer: ctx.func_decl(
+				ctx.str_sym(&format!("{}stack_pointer{}", prefix, suffix)),
+				&domain,
+				&ctx.int_sort(),
+			),
 			stack_func: ctx.func_decl(
 				ctx.str_sym(&format!("{}stack{}", prefix, suffix)),
-				&[
-					&ctx.int_sort(), // stack address
-				],
+				&domain_int,
 				&constants.value_type_config.value_sort(ctx),
 			),
 			stack_type_func: ctx.func_decl(
 				ctx.str_sym(&format!("{}stack_type{}", prefix, suffix)),
-				&[
-					&ctx.int_sort(), // index
-				],
+				&domain_int,
 				&constants.value_type_config.value_type_datatype(ctx).sort,
 			),
 			local_func: ctx.func_decl(
 				ctx.str_sym(&format!("{}local{}", prefix, suffix)),
-				&[&ctx.int_sort()],
+				&domain_int,
 				&constants.value_type_config.value_sort(ctx),
 			),
-			trapped: ctx.named_bool_const(&format!("{}trapped{}", prefix, suffix)),
+			trapped: ctx.func_decl(
+				ctx.str_sym(&format!("{}trapped{}", prefix, suffix)),
+				&domain,
+				&ctx.bool_sort(),
+			),
 		}
 	}
 
 	// stack_pointer - 1 is top of stack
 	pub fn stack_pointer(&self) -> Ast<'ctx> {
-		self.stack_pointer.clone()
+		let args: Vec<_> = self.constants.bounds.iter().collect();
+
+		self.stack_pointer.apply(&args)
 	}
 
 	pub fn stack(&self, index: &Ast<'ctx>) -> Ast<'ctx> {
-		self.stack_func.apply(&[&index])
+		let mut args: Vec<_> = self.constants.bounds.iter().collect();
+		args.push(index);
+
+		self.stack_func.apply(&args)
 	}
 
 	pub fn stack_type(&self, index: &Ast<'ctx>) -> Ast<'ctx> {
-		self.stack_type_func.apply(&[&index])
+		let mut args: Vec<_> = self.constants.bounds.iter().collect();
+		args.push(index);
+
+		self.stack_type_func.apply(&args)
 	}
 
 	pub fn local(&self, index: &Ast<'ctx>) -> Ast<'ctx> {
-		self.local_func.apply(&[&index])
+		let mut args: Vec<_> = self.constants.bounds.iter().collect();
+		args.push(index);
+
+		self.local_func.apply(&args)
 	}
 
 	pub fn trapped(&self) -> Ast<'ctx> {
-		self.trapped.clone()
+		let args: Vec<_> = self.constants.bounds.iter().collect();
+
+		self.trapped.apply(&args)
 	}
 
 	pub fn decode(&self, model: &Model<'ctx>, constants: &Constants<'ctx>) -> State {
