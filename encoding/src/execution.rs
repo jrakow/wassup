@@ -19,6 +19,13 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 		program: Either<&[Instruction], usize>,
 	) -> Self {
 		let ctx = constants.ctx;
+
+		// assert helper
+		let assert = |ast: &Ast<'ctx>| {
+			let bounds: Vec<_> = constants.bounds.iter().collect();
+			solver.assert(&ctx.forall_const(&bounds, ast));
+		};
+
 		let program_length = program.map_left(<[Instruction]>::len).into_inner();
 
 		let states: Vec<_> = (0..program_length + 1)
@@ -47,15 +54,15 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 		let initial_state = &this.states[0];
 
 		// set trapped = false
-		solver.assert(&initial_state.trapped().not());
+		assert(&initial_state.trapped().not());
 
 		// set stack(i) == initial_stack[i]
 		for (i, var) in constants.initial_stack.iter().enumerate() {
-			solver.assert(&initial_state.stack(&ctx.from_usize(i))._eq(&var));
+			assert(&initial_state.stack(&ctx.from_usize(i))._eq(&var));
 		}
 
 		// set stack_counter = initial_stack.len()
-		solver.assert(
+		assert(
 			&initial_state
 				.stack_pointer()
 				._eq(&ctx.from_usize(constants.initial_stack.len())),
@@ -63,22 +70,18 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 
 		// set local(i) = inital_locals[i]
 		for (i, var) in constants.initial_locals.iter().enumerate() {
-			solver.assert(&initial_state.local(&ctx.from_usize(i))._eq(&var));
+			assert(&initial_state.local(&ctx.from_usize(i))._eq(&var));
 		}
 
 		// assert transitions
-		let bounds: Vec<_> = constants.bounds.iter().collect();
 		for pc in 0..program_length {
-			solver.assert(&constants.ctx.forall_const(
-				&bounds,
-				&transition(
-					ctx,
-					constants,
-					&this.states[pc],
-					&this.states[pc + 1],
-					&this.program[pc],
-				),
-			))
+			assert(&transition(
+				ctx,
+				constants,
+				&this.states[pc],
+				&this.states[pc + 1],
+				&this.program[pc],
+			));
 		}
 
 		this

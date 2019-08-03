@@ -115,16 +115,13 @@ pub fn superoptimize_snippet(
 		);
 		let target_state = &target_execution.states[target_length];
 
-		let bounds: Vec<_> = constants.bounds.iter().collect();
-		// assert programs are equivalent for all inputs
-		solver.assert(&ctx.forall_const(
-			&bounds,
-			&equivalent(
-				&ctx,
-				&source_state,
-				&target_state,
-				&ctx.from_usize(local_types.len()),
-			),
+		// assert programs are equivalent
+		solver.assert(&equivalent(
+			&ctx,
+			&constants,
+			&source_state,
+			&target_state,
+			&ctx.from_usize(local_types.len()),
 		));
 
 		if !solver.check() {
@@ -221,14 +218,13 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
 	fn no_superoptimize_setlocal() {
-		let source_program = &[Const(I32(3)), SetLocal(0)];
+		let source_program = &[Const(I32(42)), SetLocal(0)];
 
 		// no optimization possible, because locals cannot be changed
 		let target = superoptimize_snippet(
 			source_program,
-			&[],
+			&[ValueType::I32],
 			ValueTypeConfig {
 				i32_size: 32,
 				i64_size: Some(64),
