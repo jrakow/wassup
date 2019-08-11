@@ -92,7 +92,11 @@ impl Value {
 			Value::I32(i) => {
 				let size = value_type_config.i32_size;
 				if size < 32 {
-					assert!((*i as u32) < 1 << size as u32);
+					if *i < 0 {
+						assert!((-*i as u32) < 1 << size as u32);
+					} else {
+						assert!((*i as u32) < 1 << size as u32);
+					}
 				}
 
 				if let Some(i64_size) = value_type_config.i64_size {
