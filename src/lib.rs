@@ -154,8 +154,8 @@ mod tests {
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![]);
@@ -168,8 +168,8 @@ mod tests {
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![Const(I32(1))]);
@@ -182,8 +182,8 @@ mod tests {
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![Const(I32(3))]);
@@ -196,8 +196,8 @@ mod tests {
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![Const(I64(3))]);
@@ -210,8 +210,8 @@ mod tests {
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![]);
@@ -219,55 +219,65 @@ mod tests {
 
 	#[test]
 	fn no_superoptimize_setlocal() {
-		let source_program = &[Const(I32(42)), SetLocal(0)];
+		let source_program = &[Const(I32(3)), SetLocal(0)];
 
 		// no optimization possible, because locals cannot be changed
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, source_program);
 	}
 
 	#[test]
+	#[ignore]
 	fn superoptimize_unreachable_garbage() {
 		let source_program = &[Unreachable, GetLocal(0)];
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![Unreachable]);
 	}
 
 	#[test]
-	#[ignore] // TODO
-	fn superoptimize_eqz() {
-		let source_program = &[I32Eqz, I32Eqz];
+	#[ignore]
+	fn superoptimize_select_0_1() {
+		let source_program = &[
+			SetLocal(0),
+			Const(I32(0)),
+			Const(I32(1)),
+			GetLocal(0),
+			Select,
+		];
 		let target = superoptimize_snippet(
 			source_program,
-			&[],
+			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
-		assert_eq!(target, vec![]);
+		assert_eq!(target, vec![I32Eqz]);
+	}
 
+	#[test]
+	fn superoptimize_eqz3() {
 		let source_program = &[I32Eqz, I32Eqz, I32Eqz];
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![I32Eqz]);
@@ -280,8 +290,8 @@ mod tests {
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![Unreachable]);
@@ -290,31 +300,30 @@ mod tests {
 	#[test]
 	#[ignore]
 	fn superoptimize_int_extend() {
-		let source_program = &[Const(I32(42)), I64ExtendUI32, I64Add];
+		let source_program = &[Const(I32(3)), I64ExtendUI32, I64Add];
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
-		assert_eq!(target, vec![Const(I64(42)), I64Add]);
+		assert_eq!(target, vec![Const(I64(3)), I64Add]);
 	}
 
 	#[test]
-	#[ignore]
 	fn superoptimize_int_wrap() {
-		let source_program = &[Const(I64(42)), I32WrapI64, I32Add];
+		let source_program = &[Const(I64(3)), I32WrapI64, I32Add];
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
-		assert_eq!(target, vec![Const(I32(42)), I32Add]);
+		assert_eq!(target, vec![Const(I32(-3)), I32Sub]);
 	}
 
 	// Increasing number of initial stack values:
@@ -328,14 +337,15 @@ mod tests {
 	// Maybe similar for initial local variables
 
 	#[test]
+	#[ignore]
 	fn superoptimize_drop() {
 		let source_program = &[GetLocal(0), Drop];
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![]);
@@ -343,47 +353,56 @@ mod tests {
 
 	#[test]
 	#[ignore]
-	fn superoptimize_locals() {
+	fn superoptimize_get_local_eq() {
 		let source_program = &[GetLocal(0), GetLocal(0), I32Eq];
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![Const(I32(1))]);
+	}
 
+	#[test]
+	fn superoptimize_tee_local_set_local() {
 		let source_program = &[TeeLocal(0), SetLocal(0)];
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![SetLocal(0)]);
+	}
 
+	#[test]
+	fn superoptimize_set_local_get_local() {
 		let source_program = &[SetLocal(0), GetLocal(0)];
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![TeeLocal(0)]);
+	}
 
+	#[test]
+	fn superoptimize_get_local_set_local() {
 		let source_program = &[GetLocal(0), SetLocal(0)];
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
 		assert_eq!(target, vec![]);
@@ -412,7 +431,6 @@ mod tests {
 	// ```
 
 	#[test]
-	#[ignore]
 	fn superoptimize_arithmetic() {
 		// 3 + (x - 0)
 		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
@@ -420,11 +438,11 @@ mod tests {
 			source_program,
 			&[],
 			ValueTypeConfig {
-				i32_size: 32,
-				i64_size: Some(64),
+				i32_size: 4,
+				i64_size: Some(8),
 			},
 		);
-		assert_eq!(target, vec![Const(I32(3)), I32Sub]);
+		assert_eq!(target, vec![Const(I32(3)), I32Add]);
 	}
 
 	// #[test]
