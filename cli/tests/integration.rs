@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod integration {
 	#[test]
-	#[ignore]
 	fn simple() {
 		assert_cli::Assert::main_binary()
 			.succeeds()

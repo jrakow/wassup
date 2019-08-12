@@ -1,7 +1,7 @@
 use parity_wasm::elements::{Instruction, Module};
+use wassup_encoding::ValueTypeConfig;
 
 #[test]
-#[ignore]
 fn module_consts_add() {
 	let wasm_binary = wabt::Wat2Wasm::new()
 		.convert(
@@ -17,7 +17,17 @@ fn module_consts_add() {
 		.unwrap();
 	let mut module: Module = parity_wasm::deserialize_buffer(wasm_binary.as_ref()).unwrap();
 
-	wassup::superoptimize_module(&mut module);
+	wassup::superoptimize_module(
+		&mut module,
+		ValueTypeConfig {
+			i32_size: 4,
+			i64_size: Some(8),
+		},
+		ValueTypeConfig {
+			i32_size: 4,
+			i64_size: Some(8),
+		},
+	);
 
 	let func_body = &module.code_section().unwrap().bodies()[0];
 	assert_eq!(

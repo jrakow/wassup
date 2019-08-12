@@ -4,7 +4,13 @@ use rayon::prelude::*;
 use wassup_encoding::*;
 use z3::*;
 
-pub fn superoptimize_module(module: &mut parity_wasm::elements::Module) {
+pub use wassup_encoding::ValueTypeConfig;
+
+pub fn superoptimize_module(
+	module: &mut parity_wasm::elements::Module,
+	value_type_config: ValueTypeConfig,
+	translation_validation_value_type_config: ValueTypeConfig,
+) {
 	// Destructure the module
 	// Safe, because the sections should be independent
 	let (type_section, code_section, function_section): (
@@ -29,13 +35,20 @@ pub fn superoptimize_module(module: &mut parity_wasm::elements::Module) {
 			let params = match signature {
 				Type::Function(f) => f.params(),
 			};
-			superoptimize_func_body(body, params)
+			superoptimize_func_body(
+				body,
+				params,
+				value_type_config,
+				translation_validation_value_type_config,
+			)
 		});
 }
 
 pub fn superoptimize_func_body(
 	func_body: &mut parity_wasm::elements::FuncBody,
 	params: &[ValueType],
+	value_type_config: ValueTypeConfig,
+	translation_validation_value_type_config: ValueTypeConfig,
 ) {
 	let mut function = Function::from_wasm_func_body_params(func_body, params);
 	for snippet in function.instructions.iter_mut() {
@@ -43,10 +56,8 @@ pub fn superoptimize_func_body(
 			let optimized = superoptimize_snippet(
 				&vec,
 				&function.local_types,
-				ValueTypeConfig {
-					i32_size: 4,
-					i64_size: Some(8),
-				},
+				value_type_config,
+				translation_validation_value_type_config,
 			); // TODO
 			*vec = optimized;
 		}
@@ -59,6 +70,7 @@ pub fn superoptimize_snippet(
 	source_program: &[Instruction],
 	local_types: &[ValueType],
 	value_type_config: ValueTypeConfig,
+	translation_validation_value_type_config: ValueTypeConfig,
 ) -> Vec<Instruction> {
 	let mut current_best = source_program.to_vec();
 
@@ -126,7 +138,17 @@ pub fn superoptimize_snippet(
 
 		if !solver.check() {
 			// already optimal
-			return current_best;
+
+			if snippets_equivalent(
+				source_program,
+				&current_best,
+				local_types,
+				translation_validation_value_type_config,
+			) {
+				return current_best;
+			} else {
+				return source_program.to_vec();
+			}
 		}
 
 		// better version found
@@ -136,9 +158,87 @@ pub fn superoptimize_snippet(
 		current_best = target_execution.decode_program(&model);
 
 		if current_best.is_empty() {
-			return current_best;
+			if snippets_equivalent(
+				source_program,
+				&current_best,
+				local_types,
+				translation_validation_value_type_config,
+			) {
+				return current_best;
+			} else {
+				return source_program.to_vec();
+			}
 		}
 	}
+}
+
+pub fn snippets_equivalent(
+	source_program: &[Instruction],
+	target_program: &[Instruction],
+	local_types: &[ValueType],
+	value_type_config: ValueTypeConfig,
+) -> bool {
+	let initial_stack = initial_stack_types(source_program, local_types);
+
+	let config = Config::default();
+	let ctx = Context::new(&config);
+	let solver = Solver::new(&ctx);
+
+	let mut initial_locals = Vec::new();
+	let mut initial_locals_bounds = Vec::new();
+	for ty in local_types {
+		if *ty == ValueType::I32 {
+			let sort = ctx.bitvector_sort(value_type_config.i32_size as u32);
+
+			let bound = ctx.fresh_const("initial_local", &sort);
+			initial_locals_bounds.push(bound.clone());
+
+			initial_locals.push(value_type_config.i32_wrap_as_i64(&ctx, &bound));
+		} else if *ty == ValueType::I64 {
+			let sort = ctx.bitvector_sort(value_type_config.i64_size.unwrap() as u32);
+
+			let bound = ctx.fresh_const("initial_local", &sort);
+			initial_locals_bounds.push(bound.clone());
+
+			initial_locals.push(bound)
+		}
+	}
+
+	let constants = Constants::new(
+		&ctx,
+		&solver,
+		initial_locals_bounds,
+		initial_locals,
+		local_types.to_vec(),
+		&initial_stack,
+		value_type_config,
+	);
+
+	let source_execution = Execution::new(
+		&constants,
+		&solver,
+		"source_".to_owned(),
+		Either::Left(source_program),
+	);
+	let target_execution = Execution::new(
+		&constants,
+		&solver,
+		"target_".to_owned(),
+		Either::Left(target_program),
+	);
+	let source_state = &source_execution.states[source_program.len()];
+	let target_state = &target_execution.states[target_program.len()];
+
+	// assert programs are equivalent
+	solver.assert(&equivalent(
+		&ctx,
+		&constants,
+		&source_state,
+		&target_state,
+		&ctx.from_usize(local_types.len()),
+	));
+
+	solver.check()
 }
 
 #[cfg(test)]
@@ -147,16 +247,20 @@ mod tests {
 	use Instruction::*;
 	use Value::*;
 
+	const DEFAULT_VALUE_TYPE_CONFIG: ValueTypeConfig = ValueTypeConfig {
+		i32_size: 4,
+		i64_size: Some(8),
+	};
+	const DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG: ValueTypeConfig = DEFAULT_VALUE_TYPE_CONFIG;
+
 	#[test]
 	fn superoptimize_nop() {
 		let source_program = &[Nop];
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![]);
 	}
@@ -167,10 +271,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Const(I32(1))]);
 	}
@@ -181,10 +283,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Const(I32(3))]);
 	}
@@ -195,10 +295,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Const(I64(3))]);
 	}
@@ -209,10 +307,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![]);
 	}
@@ -225,10 +321,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, source_program);
 	}
@@ -240,10 +334,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Unreachable]);
 	}
@@ -261,10 +353,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![I32Eqz]);
 	}
@@ -275,10 +365,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![I32Eqz]);
 	}
@@ -289,10 +377,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Unreachable]);
 	}
@@ -304,10 +390,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Const(I64(3)), I64Add]);
 	}
@@ -318,10 +402,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Const(I32(-3)), I32Sub]);
 	}
@@ -343,10 +425,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![]);
 	}
@@ -358,10 +438,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Const(I32(1))]);
 	}
@@ -372,10 +450,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![SetLocal(0)]);
 	}
@@ -386,10 +462,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![TeeLocal(0)]);
 	}
@@ -400,10 +474,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[ValueType::I32],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![]);
 	}
@@ -437,10 +509,8 @@ mod tests {
 		let target = superoptimize_snippet(
 			source_program,
 			&[],
-			ValueTypeConfig {
-				i32_size: 4,
-				i64_size: Some(8),
-			},
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TRANSVAL_VALUE_TYPE_CONFIG,
 		);
 		assert_eq!(target, vec![Const(I32(3)), I32Add]);
 	}

@@ -6,6 +6,7 @@ use std::{
 	io::{stdin, stdout, Read, Write},
 	path::Path,
 	process::exit,
+	str::FromStr,
 };
 use wabt::wat2wasm;
 
@@ -32,6 +33,38 @@ fn main() {
 				.value_name("FILE")
 				.help("Where to write the result")
 				.takes_value(true),
+		)
+		.arg(
+			Arg::with_name("OPT_SIZE_I32")
+				.long("opt-size-i32")
+				.value_name("SIZE")
+				.help("Size of a 32 bit integer in optimization")
+				.number_of_values(1)
+				.default_value("4"),
+		)
+		.arg(
+			Arg::with_name("OPT_SIZE_I64")
+				.long("opt-size-i64")
+				.value_name("SIZE")
+				.help("Size of a 64 bit integer in optimization, 0 if i64 disabled")
+				.number_of_values(1)
+				.default_value("8"),
+		)
+		.arg(
+			Arg::with_name("TRANSVAL_SIZE_I32")
+				.long("transval-size-i32")
+				.value_name("SIZE")
+				.help("Size of a 32 bit integer in translation validation")
+				.number_of_values(1)
+				.default_value("6"),
+		)
+		.arg(
+			Arg::with_name("TRANSVAL_SIZE_I64")
+				.long("transval-size-i64")
+				.value_name("SIZE")
+				.help("Size of a 64 bit integer in translation validation, 0 if i64 disabled")
+				.number_of_values(1)
+				.default_value("12"),
 		)
 		.get_matches();
 
@@ -69,7 +102,34 @@ fn rmain(args: ArgMatches) -> Result<(), String> {
 		})?
 	};
 
-	wassup::superoptimize_module(&mut input_module);
+	let opt_value_type_config = wassup::ValueTypeConfig {
+		i32_size: usize::from_str(args.value_of("OPT_SIZE_I32").unwrap())
+			.map_err(|_| "Failed to parse OPT_SIZE_I32 as a size")?,
+		i64_size: match args.value_of("OPT_SIZE_I64").unwrap() {
+			"0" => None,
+			x @ _ => {
+				Some(usize::from_str(x).map_err(|_| "Failed to parse OPT_SIZE_I64 as a size")?)
+			}
+		},
+	};
+
+	let transval_value_type_config = wassup::ValueTypeConfig {
+		i32_size: usize::from_str(args.value_of("TRANSVAL_SIZE_I32").unwrap())
+			.map_err(|_| "Failed to parse TRANSVAL_SIZE_I32 as a size")?,
+		i64_size: match args.value_of("TRANSVAL_SIZE_I64").unwrap() {
+			"0" => None,
+			x @ _ => Some(
+				usize::from_str(x).map_err(|_| "Failed to parse TRANSVAL_SIZE_I64 as a size")?,
+			),
+		},
+	};
+
+	wassup::superoptimize_module(
+		&mut input_module,
+		opt_value_type_config,
+		transval_value_type_config,
+	);
+
 	let mut buffer = serialize(input_module).unwrap();
 
 	let output_path = args.value_of("OUTPUT");

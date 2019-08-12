@@ -16,6 +16,10 @@ fn const0_add(c: &mut Criterion) {
 						i32_size: *i32_size,
 						i64_size: None,
 					},
+					ValueTypeConfig {
+						i32_size: *i32_size,
+						i64_size: None,
+					},
 				)
 			})
 		},
@@ -34,6 +38,10 @@ fn const0_add(c: &mut Criterion) {
 					ValueTypeConfig {
 						i32_size: *i32_size,
 						i64_size: Some(*i32_size * 2),
+					},
+					ValueTypeConfig {
+						i32_size: *i32_size,
+						i64_size: None,
 					},
 				)
 			})
@@ -79,6 +87,10 @@ fn eqz_repeated(c: &mut Criterion) {
 							i32_size: 4,
 							i64_size: None,
 						},
+						ValueTypeConfig {
+							i32_size: 4,
+							i64_size: None,
+						},
 					)
 				})
 			},
@@ -101,8 +113,12 @@ fn eqz_repeated(c: &mut Criterion) {
 						black_box(&source),
 						&[],
 						ValueTypeConfig {
-							i32_size: 32,
-							i64_size: Some(64),
+							i32_size: 4,
+							i64_size: Some(8),
+						},
+						ValueTypeConfig {
+							i32_size: 4,
+							i64_size: Some(8),
 						},
 					)
 				})
@@ -123,8 +139,12 @@ fn consts_add(c: &mut Criterion) {
 				black_box(source),
 				&[],
 				ValueTypeConfig {
-					i32_size: 32,
-					i64_size: Some(64),
+					i32_size: 4,
+					i64_size: Some(8),
+				},
+				ValueTypeConfig {
+					i32_size: 4,
+					i64_size: Some(8),
 				},
 			)
 		})
@@ -140,8 +160,12 @@ fn const_nop(c: &mut Criterion) {
 				black_box(source),
 				&[],
 				ValueTypeConfig {
-					i32_size: 32,
-					i64_size: Some(64),
+					i32_size: 4,
+					i64_size: Some(8),
+				},
+				ValueTypeConfig {
+					i32_size: 4,
+					i64_size: Some(8),
 				},
 			)
 		})

@@ -14,7 +14,11 @@ fn main() {
 				&source,
 				&[],
 				ValueTypeConfig {
-					i32_size: 32,
+					i32_size: 4,
+					i64_size: *i64_size,
+				},
+				ValueTypeConfig {
+					i32_size: 4,
 					i64_size: *i64_size,
 				},
 			);
