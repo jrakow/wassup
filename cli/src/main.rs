@@ -92,7 +92,7 @@ fn rmain(args: ArgMatches) -> Result<(), String> {
 			.read_to_end(&mut buffer)
 			.map_err(|e: std::io::Error| format!("Could not read input file: {}", e.to_string()))?;
 
-		if &buffer[0..4] != b"\0wasm" {
+		if &buffer[0..4] != b"\0asm" {
 			buffer =
 				wat2wasm(&buffer).map_err(|_| "Could not parse input as WAT module".to_string())?;
 		}
