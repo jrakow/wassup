@@ -53,6 +53,21 @@ pub fn superoptimize_func_body(
 	let mut function = Function::from_wasm_func_body_params(func_body, params);
 	for snippet in function.instructions.iter_mut() {
 		if let Either::Left(vec) = snippet {
+			if vec.iter().all(|i| match i {
+				Instruction::Const(_) => true,
+				_ => false,
+			}) {
+				continue;
+			}
+
+			if vec.len() == 1 {
+				match vec[0] {
+					Instruction::GetLocal(_) => continue,
+					Instruction::Unreachable => continue,
+					_ => {}
+				}
+			}
+
 			let optimized = superoptimize_snippet(&vec, &function.local_types, value_type_config);
 
 			if let Some(conf) = translation_validation_value_type_config {
