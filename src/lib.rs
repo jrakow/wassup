@@ -446,4 +446,36 @@ mod tests {
 	// 		// FIXME
 	// 	]);
 	// }
+
+	#[test]
+	fn translation_validation() {
+		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
+		let target_program = &[Const(I32(3)), I32Add];
+
+		assert!(snippets_equivalent(
+			source_program,
+			target_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 6,
+				i64_size: Some(12),
+			}
+		));
+	}
+
+	#[test]
+	fn translation_validation_not_equivalent() {
+		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
+		let target_program = &[Const(I32(2)), I32Add];
+
+		assert!(!snippets_equivalent(
+			source_program,
+			target_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 6,
+				i64_size: Some(12),
+			}
+		));
+	}
 }
