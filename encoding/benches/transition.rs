@@ -22,7 +22,7 @@ fn transition_consts_add(source: &[Instruction]) {
 	);
 	let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(source));
 
-	assert!(solver.check());
+	assert!(solver.check().unwrap());
 	let model = solver.get_model();
 
 	assert_eq!(

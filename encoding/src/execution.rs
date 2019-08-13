@@ -448,7 +448,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(&execution.decode_program(&model), program);
@@ -476,7 +476,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -511,7 +511,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -546,7 +546,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -605,7 +605,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -640,7 +640,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -675,7 +675,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -734,7 +734,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -793,7 +793,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -828,7 +828,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -863,7 +863,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -917,7 +917,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert_eq!(
@@ -992,7 +992,7 @@ mod tests {
 		);
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert!(!execution.states[0].decode(&model, &constants).trapped);
@@ -1023,7 +1023,7 @@ mod tests {
 
 		let execution = Execution::new(&constants, &solver, "".to_owned(), Either::Left(program));
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		assert!(!execution.states[0].decode(&model, &constants).trapped);

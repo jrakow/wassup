@@ -140,7 +140,7 @@ fn action_result(
 				Either::Left(source_program),
 			);
 
-			assert!(solver.check());
+			assert!(solver.check().unwrap());
 			let model = solver.get_model();
 
 			Some(

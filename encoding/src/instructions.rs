@@ -683,7 +683,7 @@ mod tests {
 			value_type_config,
 		);
 
-		assert!(solver.check());
+		assert!(solver.check().unwrap());
 		let model = solver.get_model();
 
 		let eval = |ast: &Ast| -> usize {

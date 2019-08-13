@@ -151,7 +151,7 @@ pub fn superoptimize_snippet(
 			&ctx.from_usize(local_types.len()),
 		));
 
-		if !solver.check() {
+		if !solver.check().unwrap() {
 			// already optimal
 			return current_best;
 		}
@@ -234,7 +234,7 @@ pub fn snippets_equivalent(
 		&ctx.from_usize(local_types.len()),
 	));
 
-	solver.check()
+	solver.check().unwrap()
 }
 
 #[cfg(test)]
