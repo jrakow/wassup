@@ -104,24 +104,33 @@ fn rmain(args: ArgMatches) -> Result<(), String> {
 
 	let opt_value_type_config = wassup::ValueTypeConfig {
 		i32_size: usize::from_str(args.value_of("OPT_SIZE_I32").unwrap())
-			.map_err(|_| "Failed to parse OPT_SIZE_I32 as a size")?,
+			.map_err(|_| "Could not parse OPT_SIZE_I32 as a size")?,
 		i64_size: match args.value_of("OPT_SIZE_I64").unwrap() {
 			"0" => None,
 			x @ _ => {
-				Some(usize::from_str(x).map_err(|_| "Failed to parse OPT_SIZE_I64 as a size")?)
+				Some(usize::from_str(x).map_err(|_| "Could not parse OPT_SIZE_I64 as a size")?)
 			}
 		},
 	};
 
-	let transval_value_type_config = wassup::ValueTypeConfig {
-		i32_size: usize::from_str(args.value_of("TRANSVAL_SIZE_I32").unwrap())
-			.map_err(|_| "Failed to parse TRANSVAL_SIZE_I32 as a size")?,
-		i64_size: match args.value_of("TRANSVAL_SIZE_I64").unwrap() {
-			"0" => None,
-			x @ _ => Some(
-				usize::from_str(x).map_err(|_| "Failed to parse TRANSVAL_SIZE_I64 as a size")?,
-			),
-		},
+	let transval_value_type_config = {
+		let i32_size = usize::from_str(args.value_of("TRANSVAL_SIZE_I32").unwrap())
+			.map_err(|_| "Could not parse TRANSVAL_SIZE_I32 as a size")?;
+		let i64_size = usize::from_str(args.value_of("TRANSVAL_SIZE_I64").unwrap())
+			.map_err(|_| "Could not parse TRANSVAL_SIZE_I64 as a size")?;
+
+		match (i32_size, i64_size) {
+			(0, 0) => None,
+			(_, 0) => Some(wassup::ValueTypeConfig {
+				i32_size,
+				i64_size: None,
+			}),
+			(0, _) => Err("TRANSVAL_SIZE_I32 needs to be enabled to enable TRANSVAL_SIZE_I64")?,
+			(_, _) => Some(wassup::ValueTypeConfig {
+				i32_size,
+				i64_size: Some(i64_size),
+			}),
+		}
 	};
 
 	wassup::superoptimize_module(

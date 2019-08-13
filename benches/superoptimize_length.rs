@@ -17,10 +17,6 @@ fn main() {
 					i32_size: 4,
 					i64_size: *i64_size,
 				},
-				ValueTypeConfig {
-					i32_size: 4,
-					i64_size: *i64_size,
-				},
 			);
 
 			let elapsed = start.elapsed();

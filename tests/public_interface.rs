@@ -23,10 +23,10 @@ fn module_consts_add() {
 			i32_size: 4,
 			i64_size: Some(8),
 		},
-		ValueTypeConfig {
+		Some(ValueTypeConfig {
 			i32_size: 4,
 			i64_size: Some(8),
-		},
+		}),
 	);
 
 	let func_body = &module.code_section().unwrap().bodies()[0];
