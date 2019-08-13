@@ -57,8 +57,15 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 		assert(&initial_state.trapped().not());
 
 		// set stack(i) == initial_stack[i]
-		for (i, var) in constants.initial_stack.iter().enumerate() {
-			assert(&initial_state.stack(&ctx.from_usize(i))._eq(&var));
+		for (i, (var, ty)) in constants
+			.initial_stack
+			.iter()
+			.zip(constants.initial_stack_types.iter())
+			.enumerate()
+		{
+			let i = &ctx.from_usize(i);
+			assert(&initial_state.stack(i)._eq(var));
+			assert(&initial_state.stack_type(i)._eq(ty));
 		}
 
 		// set stack_counter = initial_stack.len()

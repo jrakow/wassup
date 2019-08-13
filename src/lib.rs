@@ -438,7 +438,7 @@ mod tests {
 		// 3 + (x - 0)
 		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
 		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
-		assert_eq!(target, vec![Const(I32(3)), I32Add]);
+		assert_eq!(target, vec![Const(I32(-3)), I32Sub]);
 	}
 
 	// #[test]
