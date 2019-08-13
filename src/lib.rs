@@ -71,8 +71,9 @@ pub fn superoptimize_func_body(
 			let optimized = superoptimize_snippet(&vec, &function.local_types, value_type_config);
 
 			if let Some(conf) = translation_validation_value_type_config {
-				if !snippets_equivalent(&vec, &optimized, &function.local_types, conf) {
-					continue;
+				match snippets_equivalent(&vec, &optimized, &function.local_types, conf) {
+					Some(false) | None => continue,
+					_ => {}
 				}
 			}
 			*vec = optimized;
@@ -89,82 +90,92 @@ pub fn superoptimize_snippet(
 ) -> Vec<Instruction> {
 	let mut current_best = source_program.to_vec();
 
-	let initial_stack = initial_stack_types(source_program, local_types);
-
 	loop {
-		let config = Config::default();
-		let ctx = Context::new(&config);
-		let solver = Solver::new(&ctx);
-
-		let mut initial_locals = Vec::new();
-		let mut initial_locals_bounds = Vec::new();
-		for ty in local_types {
-			if *ty == ValueType::I32 {
-				let sort = ctx.bitvector_sort(value_type_config.i32_size as u32);
-
-				let bound = ctx.fresh_const("initial_local", &sort);
-				initial_locals_bounds.push(bound.clone());
-
-				initial_locals.push(value_type_config.i32_wrap_as_i64(&ctx, &bound));
-			} else if *ty == ValueType::I64 {
-				let sort = ctx.bitvector_sort(value_type_config.i64_size.unwrap() as u32);
-
-				let bound = ctx.fresh_const("initial_local", &sort);
-				initial_locals_bounds.push(bound.clone());
-
-				initial_locals.push(bound)
-			}
+		match improve_snippet(&current_best, local_types, value_type_config) {
+			Some(better) => current_best = better,
+			None => return current_best,
 		}
-
-		let constants = Constants::new(
-			&ctx,
-			&solver,
-			initial_locals_bounds,
-			initial_locals,
-			local_types.to_vec(),
-			&initial_stack,
-			value_type_config,
-		);
-		let target_length = current_best.len() - 1;
-
-		let source_execution = Execution::new(
-			&constants,
-			&solver,
-			"source_".to_owned(),
-			Either::Left(&current_best),
-		);
-		let source_state = &source_execution.states[current_best.len()];
-		let target_execution = Execution::new(
-			&constants,
-			&solver,
-			"target_".to_owned(),
-			Either::Right(target_length),
-		);
-		let target_state = &target_execution.states[target_length];
-
-		// assert programs are equivalent
-		solver.assert(&equivalent(
-			&ctx,
-			&constants,
-			&source_state,
-			&target_state,
-			&ctx.from_usize(local_types.len()),
-		));
-
-		if !solver.check().unwrap() {
-			// already optimal
-			return current_best;
-		}
-
-		// better version found
-		// decode
-
-		let model = solver.get_model();
-		current_best = target_execution.decode_program(&model);
 
 		if current_best.is_empty() {
 			return current_best;
 		}
+	}
+}
+
+pub fn improve_snippet(
+	source_program: &[Instruction],
+	local_types: &[ValueType],
+	value_type_config: ValueTypeConfig,
+) -> Option<Vec<Instruction>> {
+	let initial_stack = initial_stack_types(source_program, local_types);
+
+	let config = Config::default();
+	let ctx = Context::new(&config);
+	let solver = Solver::new(&ctx);
+
+	let mut initial_locals = Vec::new();
+	let mut initial_locals_bounds = Vec::new();
+	for ty in local_types {
+		if *ty == ValueType::I32 {
+			let sort = ctx.bitvector_sort(value_type_config.i32_size as u32);
+
+			let bound = ctx.fresh_const("initial_local", &sort);
+			initial_locals_bounds.push(bound.clone());
+
+			initial_locals.push(value_type_config.i32_wrap_as_i64(&ctx, &bound));
+		} else if *ty == ValueType::I64 {
+			let sort = ctx.bitvector_sort(value_type_config.i64_size.unwrap() as u32);
+
+			let bound = ctx.fresh_const("initial_local", &sort);
+			initial_locals_bounds.push(bound.clone());
+
+			initial_locals.push(bound)
+		}
+	}
+
+	let constants = Constants::new(
+		&ctx,
+		&solver,
+		initial_locals_bounds,
+		initial_locals,
+		local_types.to_vec(),
+		&initial_stack,
+		value_type_config,
+	);
+	let target_length = source_program.len() - 1;
+
+	let source_execution = Execution::new(
+		&constants,
+		&solver,
+		"source_".to_owned(),
+		Either::Left(&source_program),
+	);
+	let source_state = &source_execution.states[source_program.len()];
+	let target_execution = Execution::new(
+		&constants,
+		&solver,
+		"target_".to_owned(),
+		Either::Right(target_length),
+	);
+	let target_state = &target_execution.states[target_length];
+
+	// assert programs are equivalent
+	solver.assert(&equivalent(
+		&ctx,
+		&constants,
+		&source_state,
+		&target_state,
+		&ctx.from_usize(local_types.len()),
+	));
+
+	if solver.check()? {
+		// better version found
+		// decode
+
+		let model = solver.get_model();
+		Some(target_execution.decode_program(&model))
+	} else {
+		None
 	}
 }
 
@@ -173,7 +184,7 @@ pub fn snippets_equivalent(
 	target_program: &[Instruction],
 	local_types: &[ValueType],
 	value_type_config: ValueTypeConfig,
-) -> bool {
+) -> Option<bool> {
 	let initial_stack = initial_stack_types(source_program, local_types);
 
 	let config = Config::default();
@@ -234,7 +245,7 @@ pub fn snippets_equivalent(
 		&ctx.from_usize(local_types.len()),
 	));
 
-	solver.check().unwrap()
+	solver.check()
 }
 
 #[cfg(test)]
@@ -277,6 +288,7 @@ mod tests {
 	}
 
 	#[test]
+	#[ignore]
 	fn superoptimize_add0() {
 		let source_program = &[Const(I32(0)), I32Add];
 		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
@@ -421,6 +433,7 @@ mod tests {
 	// ```
 
 	#[test]
+	#[ignore]
 	fn superoptimize_arithmetic() {
 		// 3 + (x - 0)
 		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
@@ -475,7 +488,8 @@ mod tests {
 				i32_size: 6,
 				i64_size: Some(12),
 			}
-		));
+		)
+		.unwrap());
 	}
 
 	#[test]
@@ -491,6 +505,7 @@ mod tests {
 				i32_size: 6,
 				i64_size: Some(12),
 			}
-		));
+		)
+		.unwrap());
 	}
 }
