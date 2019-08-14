@@ -52,34 +52,35 @@ pub fn superoptimize_func_body(
 	translation_validation_value_type_config: Option<ValueTypeConfig>,
 ) {
 	let mut function = Function::from_wasm_func_body_params(func_body, params);
-	for snippet in function.instructions.iter_mut() {
+	let (instructions, local_types) = (&mut function.instructions, &function.local_types);
+	instructions.par_iter_mut().for_each(|snippet| {
 		if let Either::Left(vec) = snippet {
 			if vec.iter().all(|i| match i {
 				Instruction::Const(_) => true,
 				_ => false,
 			}) {
-				continue;
+				return;
 			}
 
 			if vec.len() == 1 {
 				match vec[0] {
-					Instruction::GetLocal(_) => continue,
-					Instruction::Unreachable => continue,
+					Instruction::GetLocal(_) => return,
+					Instruction::Unreachable => return,
 					_ => {}
 				}
 			}
 
-			let optimized = superoptimize_snippet(&vec, &function.local_types, value_type_config);
+			let optimized = superoptimize_snippet(&vec, &local_types, value_type_config);
 
 			if let Some(conf) = translation_validation_value_type_config {
-				match snippets_equivalent(&vec, &optimized, &function.local_types, conf) {
-					Some(false) | None => continue,
+				match snippets_equivalent(&vec, &optimized, &local_types, conf) {
+					Some(false) | None => return,
 					_ => {}
 				}
 			}
 			*vec = optimized;
 		}
-	}
+	});
 
 	*func_body = function.to_wasm_func_body();
 }
