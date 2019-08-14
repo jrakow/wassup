@@ -99,10 +99,7 @@ pub fn superoptimize_snippet(
 
 	loop {
 		match improve_snippet(&current_best, local_types, value_type_config, timeout_ms) {
-			Some(better) => {
-				log::info!("Optimized {:?} to {:?}", &current_best, &better);
-				current_best = better
-			}
+			Some(better) => current_best = better,
 			None => return current_best,
 		}
 
@@ -247,14 +244,21 @@ pub fn improve_snippet(
 		&ctx.from_usize(local_types.len()),
 	));
 
-	if solver.check()? {
-		// better version found
-		// decode
-
-		let model = solver.get_model();
-		Some(target_execution.decode_program(&model))
-	} else {
-		None
+	match solver.check() {
+		Some(true) => {
+			let model = solver.get_model();
+			let better = target_execution.decode_program(&model);
+			log::info!("Optimized {:?} to {:?}", &source_program, &better);
+			Some(better)
+		}
+		Some(false) => {
+			log::info!("Proved {:?} optimal", &source_program);
+			None
+		}
+		None => {
+			log::info!("Optimization of {:?} timed out", &source_program);
+			None
+		}
 	}
 }
 
@@ -348,7 +352,31 @@ pub fn snippets_equivalent(
 		&ctx.from_usize(local_types.len()),
 	));
 
-	solver.check()
+	let x = solver.check();
+	match x {
+		Some(true) => {
+			log::info!(
+				"Programs {:?} and {:?} proven equivalent",
+				&source_program,
+				&target_program
+			);
+		}
+		Some(false) => {
+			log::info!(
+				"Programs {:?} and {:?} proven different",
+				&source_program,
+				&target_program
+			);
+		}
+		None => {
+			log::info!(
+				"Equivalence of programs {:?} and {:?} timed out",
+				&source_program,
+				&target_program
+			);
+		}
+	}
+	x
 }
 
 #[cfg(test)]
