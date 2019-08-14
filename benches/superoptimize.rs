@@ -16,6 +16,7 @@ fn const0_add(c: &mut Criterion) {
 						i32_size: *i32_size,
 						i64_size: None,
 					},
+					None,
 				)
 			})
 		},
@@ -35,6 +36,7 @@ fn const0_add(c: &mut Criterion) {
 						i32_size: *i32_size,
 						i64_size: Some(*i32_size * 2),
 					},
+					None,
 				)
 			})
 		},
@@ -79,6 +81,7 @@ fn eqz_repeated(c: &mut Criterion) {
 							i32_size: 4,
 							i64_size: None,
 						},
+						None,
 					)
 				})
 			},
@@ -104,6 +107,7 @@ fn eqz_repeated(c: &mut Criterion) {
 							i32_size: 4,
 							i64_size: Some(8),
 						},
+						None,
 					)
 				})
 			},
@@ -126,6 +130,7 @@ fn consts_add(c: &mut Criterion) {
 					i32_size: 4,
 					i64_size: Some(8),
 				},
+				None,
 			)
 		})
 	});
@@ -143,6 +148,7 @@ fn const_nop(c: &mut Criterion) {
 					i32_size: 4,
 					i64_size: Some(8),
 				},
+				None,
 			)
 		})
 	});

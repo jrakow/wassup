@@ -11,6 +11,7 @@ pub fn superoptimize_module(
 	module: &mut parity_wasm::elements::Module,
 	value_type_config: ValueTypeConfig,
 	translation_validation_value_type_config: Option<ValueTypeConfig>,
+	timeout_ms: Option<usize>,
 ) {
 	// Destructure the module
 	// Safe, because the sections should be independent
@@ -41,6 +42,7 @@ pub fn superoptimize_module(
 				params,
 				value_type_config,
 				translation_validation_value_type_config,
+				timeout_ms,
 			)
 		});
 }
@@ -50,6 +52,7 @@ pub fn superoptimize_func_body(
 	params: &[ValueType],
 	value_type_config: ValueTypeConfig,
 	translation_validation_value_type_config: Option<ValueTypeConfig>,
+	timeout_ms: Option<usize>,
 ) {
 	let mut function = Function::from_wasm_func_body_params(func_body, params);
 	let (instructions, local_types) = (&mut function.instructions, &function.local_types);
@@ -70,10 +73,11 @@ pub fn superoptimize_func_body(
 				}
 			}
 
-			let optimized = superoptimize_snippet(&vec, &local_types, value_type_config);
+			let optimized =
+				superoptimize_snippet(&vec, &local_types, value_type_config, timeout_ms);
 
 			if let Some(conf) = translation_validation_value_type_config {
-				match snippets_equivalent(&vec, &optimized, &local_types, conf) {
+				match snippets_equivalent(&vec, &optimized, &local_types, conf, timeout_ms) {
 					Some(false) | None => return,
 					_ => {}
 				}
@@ -89,11 +93,12 @@ pub fn superoptimize_snippet(
 	source_program: &[Instruction],
 	local_types: &[ValueType],
 	value_type_config: ValueTypeConfig,
+	timeout_ms: Option<usize>,
 ) -> Vec<Instruction> {
 	let mut current_best = source_program.to_vec();
 
 	loop {
-		match improve_snippet(&current_best, local_types, value_type_config) {
+		match improve_snippet(&current_best, local_types, value_type_config, timeout_ms) {
 			Some(better) => {
 				log::info!("Optimized {:?} to {:?}", &current_best, &better);
 				current_best = better
@@ -163,10 +168,18 @@ pub fn improve_snippet(
 	source_program: &[Instruction],
 	local_types: &[ValueType],
 	value_type_config: ValueTypeConfig,
+	timeout_ms: Option<usize>,
 ) -> Option<Vec<Instruction>> {
 	let initial_stack = initial_stack_types(source_program, local_types);
 
-	let config = Config::default();
+	let config = {
+		let mut c = Config::default();
+		if let Some(timeout_ms) = timeout_ms {
+			c.set_timeout_msec(timeout_ms.try_into().unwrap());
+		}
+		c
+	};
+
 	let ctx = Context::new(&config);
 	let solver = Solver::new(&ctx);
 
@@ -250,10 +263,18 @@ pub fn snippets_equivalent(
 	target_program: &[Instruction],
 	local_types: &[ValueType],
 	value_type_config: ValueTypeConfig,
+	timeout_ms: Option<usize>,
 ) -> Option<bool> {
 	let initial_stack = initial_stack_types(source_program, local_types);
 
-	let config = Config::default();
+	let config = {
+		let mut c = Config::default();
+		if let Some(timeout_ms) = timeout_ms {
+			c.set_timeout_msec(timeout_ms.try_into().unwrap());
+		}
+		c
+	};
+
 	let ctx = Context::new(&config);
 	let solver = Solver::new(&ctx);
 
@@ -341,38 +362,65 @@ mod tests {
 		i64_size: Some(8),
 	};
 
+	const DEFAULT_TIMEOUT: Option<usize> = Some(300_000); // 5 min
+
 	#[test]
 	fn superoptimize_nop() {
 		let source_program = &[Nop];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![]);
 	}
 
 	#[test]
 	fn superoptimize_const_nop() {
 		let source_program = &[Const(I32(1)), Nop];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Const(I32(1))]);
 	}
 
 	#[test]
 	fn superoptimize_consts_add() {
 		let source_program = &[Const(I32(1)), Const(I32(2)), I32Add];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Const(I32(3))]);
 	}
 
 	#[test]
 	fn superoptimize_consts_add_64bit() {
 		let source_program = &[Const(I64(1)), Const(I64(2)), I64Add];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Const(I64(3))]);
 	}
 
 	#[test]
 	fn superoptimize_add0() {
 		let source_program = &[Const(I32(0)), I32Add];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![]);
 	}
 
@@ -381,8 +429,12 @@ mod tests {
 		let source_program = &[Const(I32(3)), SetLocal(0)];
 
 		// no optimization possible, because locals cannot be changed
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, source_program);
 	}
 
@@ -390,8 +442,12 @@ mod tests {
 	#[ignore]
 	fn superoptimize_unreachable_garbage() {
 		let source_program = &[Unreachable, GetLocal(0)];
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Unreachable]);
 	}
 
@@ -405,22 +461,36 @@ mod tests {
 			GetLocal(0),
 			Select,
 		];
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![I32Eqz]);
 	}
 
 	#[test]
 	fn superoptimize_eqz3() {
 		let source_program = &[I32Eqz, I32Eqz, I32Eqz];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![I32Eqz]);
 	}
 
 	#[test]
 	fn superoptimize_trapped() {
 		let source_program = &[Const(I32(0)), I32Add, Const(I32(0)), Const(I32(3)), I32DivU];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Unreachable]);
 	}
 
@@ -428,14 +498,24 @@ mod tests {
 	#[ignore] // works, but takes long
 	fn superoptimize_int_extend() {
 		let source_program = &[Const(I32(3)), I64ExtendUI32, I64Add];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Const(I64(3)), I64Add]);
 	}
 
 	#[test]
 	fn superoptimize_int_wrap() {
 		let source_program = &[Const(I64(3)), I32WrapI64, I32Add];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Const(I32(-3)), I32Sub]);
 	}
 
@@ -453,8 +533,12 @@ mod tests {
 	#[ignore]
 	fn superoptimize_drop() {
 		let source_program = &[GetLocal(0), Drop];
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![]);
 	}
 
@@ -462,32 +546,48 @@ mod tests {
 	#[ignore]
 	fn superoptimize_get_local_eq() {
 		let source_program = &[GetLocal(0), GetLocal(0), I32Eq];
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Const(I32(1))]);
 	}
 
 	#[test]
 	fn superoptimize_tee_local_set_local() {
 		let source_program = &[TeeLocal(0), SetLocal(0)];
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![SetLocal(0)]);
 	}
 
 	#[test]
 	fn superoptimize_set_local_get_local() {
 		let source_program = &[SetLocal(0), GetLocal(0)];
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![TeeLocal(0)]);
 	}
 
 	#[test]
 	fn superoptimize_get_local_set_local() {
 		let source_program = &[GetLocal(0), SetLocal(0)];
-		let target =
-			superoptimize_snippet(source_program, &[ValueType::I32], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[ValueType::I32],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![]);
 	}
 
@@ -517,7 +617,12 @@ mod tests {
 	fn superoptimize_arithmetic() {
 		// 3 + (x - 0)
 		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
-		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
 		assert_eq!(target, vec![Const(I32(-3)), I32Sub]);
 	}
 
@@ -531,6 +636,7 @@ mod tests {
 				i32_size: 4,
 				i64_size: Some(8),
 			},
+			DEFAULT_TIMEOUT,
 		);
 		assert_eq!(target, source_program);
 	}
@@ -545,6 +651,7 @@ mod tests {
 				i32_size: 4,
 				i64_size: Some(8),
 			},
+			DEFAULT_TIMEOUT,
 		);
 		assert_eq!(target, source_program);
 	}
@@ -595,7 +702,8 @@ mod tests {
 			ValueTypeConfig {
 				i32_size: 6,
 				i64_size: Some(12),
-			}
+			},
+			DEFAULT_TIMEOUT,
 		)
 		.unwrap());
 	}
@@ -612,7 +720,8 @@ mod tests {
 			ValueTypeConfig {
 				i32_size: 6,
 				i64_size: Some(12),
-			}
+			},
+			DEFAULT_TIMEOUT,
 		)
 		.unwrap());
 	}

@@ -17,6 +17,7 @@ fn main() {
 					i32_size: 4,
 					i64_size: *i64_size,
 				},
+				None,
 			);
 
 			let elapsed = start.elapsed();

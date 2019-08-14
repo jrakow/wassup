@@ -27,6 +27,7 @@ fn module_consts_add() {
 			i32_size: 4,
 			i64_size: Some(8),
 		}),
+		None,
 	);
 
 	let func_body = &module.code_section().unwrap().bodies()[0];

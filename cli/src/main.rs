@@ -71,6 +71,13 @@ fn main() {
 				.number_of_values(1)
 				.default_value("12"),
 		)
+		.arg(
+			Arg::with_name("TIMEOUT")
+				.long("timeout")
+				.value_name("TIMEOUT")
+				.help("Timeout in milliseconds for the superoptimization of a single snippet")
+				.number_of_values(1),
+		)
 		.get_matches();
 
 	exit(match rmain(args) {
@@ -138,10 +145,15 @@ fn rmain(args: ArgMatches) -> Result<(), String> {
 		}
 	};
 
+	let timeout_ms = args
+		.value_of("TIMEOUT")
+		.map(|s| usize::from_str(s).expect("Could not parse TIMEOUT as usize"));
+
 	wassup::superoptimize_module(
 		&mut input_module,
 		opt_value_type_config,
 		transval_value_type_config,
+		timeout_ms,
 	);
 
 	let mut buffer = serialize(input_module).unwrap();
