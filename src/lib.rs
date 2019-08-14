@@ -288,7 +288,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
 	fn superoptimize_add0() {
 		let source_program = &[Const(I32(0)), I32Add];
 		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
@@ -344,7 +343,7 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore]
+	#[ignore] // works, but takes long
 	fn superoptimize_int_extend() {
 		let source_program = &[Const(I32(3)), I64ExtendUI32, I64Add];
 		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
@@ -433,7 +432,6 @@ mod tests {
 	// ```
 
 	#[test]
-	#[ignore]
 	fn superoptimize_arithmetic() {
 		// 3 + (x - 0)
 		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
