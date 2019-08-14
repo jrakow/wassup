@@ -686,6 +686,21 @@ mod tests {
 		assert_eq!(target, source_program);
 	}
 
+	#[test]
+	fn superoptimize_double_const_add() {
+		let source_program = &[GetLocal(1), Const(I32(32)), I32Add, Const(I32(24)), I32Add];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 4,
+				i64_size: Some(8),
+			},
+			DEFAULT_TIMEOUT,
+		);
+		assert_eq!(target, vec![GetLocal(1), Const(I32(56)), I32Add]);
+	}
+
 	// #[test]
 	// fn superoptimize_biguint() {
 	// 	// TODO
