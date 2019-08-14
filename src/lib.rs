@@ -77,9 +77,11 @@ pub fn superoptimize_func_body(
 				superoptimize_snippet(&vec, &local_types, value_type_config, timeout_ms);
 
 			if let Some(conf) = translation_validation_value_type_config {
-				match snippets_equivalent(&vec, &optimized, &local_types, conf, timeout_ms) {
-					Some(false) | None => return,
-					_ => {}
+				if *vec != optimized {
+					match snippets_equivalent(&vec, &optimized, &local_types, conf, timeout_ms) {
+						Some(false) | None => return,
+						_ => {}
+					}
 				}
 			}
 			*vec = optimized;
