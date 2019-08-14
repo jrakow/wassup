@@ -156,9 +156,13 @@ fn rmain(args: ArgMatches) -> Result<(), String> {
 		timeout_ms,
 	);
 
-	let mut buffer = serialize(input_module).unwrap();
-
 	let output_path = args.value_of("OUTPUT");
+
+	if output_path == None {
+		return Ok(());
+	}
+
+	let mut buffer = serialize(input_module).unwrap();
 
 	// detect output format
 	// wat iff stdout or (specified and ends in "wat")
