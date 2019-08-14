@@ -94,7 +94,10 @@ pub fn superoptimize_snippet(
 
 	loop {
 		match improve_snippet(&current_best, local_types, value_type_config) {
-			Some(better) => current_best = better,
+			Some(better) => {
+				log::info!("Optimized {:?} to {:?}", &current_best, &better);
+				current_best = better
+			}
 			None => return current_best,
 		}
 

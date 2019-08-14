@@ -14,6 +14,7 @@ clap = "2.33.0"
 parity-wasm = "0.38.0"
 wabt = "0.7.4"
 wassup = { path = ".." }
+env_logger = "0.6.2"
 
 [dev-dependencies]
 assert_cli = "0.6.3"

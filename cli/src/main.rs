@@ -11,6 +11,11 @@ use std::{
 use wabt::wat2wasm;
 
 fn main() {
+	if std::env::var("RUST_LOG").is_err() {
+		std::env::set_var("RUST_LOG", "info")
+	}
+	env_logger::init();
+
 	let args = App::new("wassup")
 		.version(crate_version!())
 		.author(crate_authors!("\n"))
