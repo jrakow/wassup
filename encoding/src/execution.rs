@@ -18,6 +18,22 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 		prefix: String,
 		program: Either<&[Instruction], usize>,
 	) -> Self {
+		Self::new_with_const_bounds(
+			constants,
+			solver,
+			prefix,
+			program,
+			vec![None; program.map_left(<[Instruction]>::len).into_inner()],
+		)
+	}
+
+	pub fn new_with_const_bounds(
+		constants: &'constants Constants<'ctx>,
+		solver: &Solver<'ctx>,
+		prefix: String,
+		program: Either<&[Instruction], usize>,
+		const_bounds: Vec<Option<Ast<'ctx>>>,
+	) -> Self {
 		let ctx = constants.ctx;
 
 		// assert helper
@@ -39,7 +55,30 @@ impl<'ctx, 'constants, 'solver> Execution<'ctx, 'constants> {
 			program: match program {
 				Either::Left(program) => program
 					.iter()
-					.map(|instr| instr.encode(ctx, constants.value_type_config))
+					.zip(const_bounds.iter())
+					.map(|(instr, const_bound)| match (instr, const_bound) {
+						(Instruction::Const(v), Some(x)) => {
+							let const_constructor =
+								&instruction_datatype(ctx, constants.value_type_config).variants
+									[instr.as_usize(constants.value_type_config)]
+								.constructor;
+
+							let value = match v.value_type() {
+								ValueType::I32 => {
+									constants.value_type_config.i32_wrap_as_i64(ctx, x)
+								}
+								ValueType::I64 => x.clone(),
+								_ => unreachable!(),
+							};
+							const_constructor.apply(&[
+								&value,
+								&constants
+									.value_type_config
+									.encode_value_type(ctx, v.value_type()),
+							])
+						}
+						_ => instr.encode(ctx, constants.value_type_config),
+					})
 					.collect(),
 				Either::Right(program_length) => (0..program_length)
 					.map(|i| {

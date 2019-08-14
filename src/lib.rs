@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use wassup_encoding::*;
 use z3::*;
 
+use std::convert::TryInto;
 pub use wassup_encoding::ValueTypeConfig;
 
 pub fn superoptimize_module(
@@ -102,6 +103,58 @@ pub fn superoptimize_snippet(
 	}
 }
 
+fn const_bounds<'ctx>(
+	ctx: &'ctx Context,
+	program: &[Instruction],
+	value_type_config: ValueTypeConfig,
+) -> Vec<Option<Ast<'ctx>>> {
+	program
+		.iter()
+		.map(|i| match i {
+			Instruction::Const(Value::I32(i)) => {
+				let size = value_type_config.i32_size;
+				let representable = if size < 32 {
+					if *i < 0 {
+						(-*i as u32) < 1 << size as u32
+					} else {
+						(*i as u32) < 1 << size as u32
+					}
+				} else {
+					true
+				};
+
+				if !representable {
+					Some(ctx.fresh_bitvector_const("const", size.try_into().unwrap()))
+				} else {
+					None
+				}
+			}
+			Instruction::Const(Value::I64(i)) => {
+				if let Some(size) = value_type_config.i64_size {
+					let representable = if size < 64 {
+						if *i < 0 {
+							(-*i as u64) < 1 << size as u64
+						} else {
+							(*i as u64) < 1 << size as u64
+						}
+					} else {
+						true
+					};
+
+					if !representable {
+						Some(ctx.fresh_bitvector_const("const", size.try_into().unwrap()))
+					} else {
+						None
+					}
+				} else {
+					None
+				}
+			}
+			_ => None,
+		})
+		.collect()
+}
+
 pub fn improve_snippet(
 	source_program: &[Instruction],
 	local_types: &[ValueType],
@@ -133,10 +186,17 @@ pub fn improve_snippet(
 		}
 	}
 
+	let const_bounds = const_bounds(&ctx, source_program, value_type_config);
+
+	let bounds: Vec<Ast> = initial_locals_bounds
+		.iter()
+		.cloned()
+		.chain(const_bounds.iter().cloned().filter_map(|x| x))
+		.collect();
 	let constants = Constants::new(
 		&ctx,
 		&solver,
-		initial_locals_bounds,
+		bounds,
 		initial_locals,
 		local_types.to_vec(),
 		&initial_stack,
@@ -144,18 +204,20 @@ pub fn improve_snippet(
 	);
 	let target_length = source_program.len() - 1;
 
-	let source_execution = Execution::new(
+	let source_execution = Execution::new_with_const_bounds(
 		&constants,
 		&solver,
 		"source_".to_owned(),
 		Either::Left(&source_program),
+		const_bounds.clone(),
 	);
 	let source_state = &source_execution.states[source_program.len()];
-	let target_execution = Execution::new(
+	let target_execution = Execution::new_with_const_bounds(
 		&constants,
 		&solver,
 		"target_".to_owned(),
 		Either::Right(target_length),
+		const_bounds,
 	);
 	let target_state = &target_execution.states[target_length];
 
@@ -211,27 +273,43 @@ pub fn snippets_equivalent(
 		}
 	}
 
+	let source_const_bounds = const_bounds(&ctx, source_program, value_type_config);
+	let target_const_bounds = const_bounds(&ctx, target_program, value_type_config);
+
+	let bounds: Vec<Ast> = initial_locals_bounds
+		.iter()
+		.cloned()
+		.chain(
+			source_const_bounds
+				.iter()
+				.chain(target_const_bounds.iter())
+				.cloned()
+				.filter_map(|x| x),
+		)
+		.collect();
 	let constants = Constants::new(
 		&ctx,
 		&solver,
-		initial_locals_bounds,
+		bounds,
 		initial_locals,
 		local_types.to_vec(),
 		&initial_stack,
 		value_type_config,
 	);
 
-	let source_execution = Execution::new(
+	let source_execution = Execution::new_with_const_bounds(
 		&constants,
 		&solver,
 		"source_".to_owned(),
-		Either::Left(source_program),
+		Either::Left(&source_program),
+		source_const_bounds.clone(),
 	);
-	let target_execution = Execution::new(
+	let target_execution = Execution::new_with_const_bounds(
 		&constants,
 		&solver,
 		"target_".to_owned(),
-		Either::Left(target_program),
+		Either::Left(&target_program),
+		target_const_bounds.clone(),
 	);
 	let source_state = &source_execution.states[source_program.len()];
 	let target_state = &target_execution.states[target_program.len()];
@@ -437,6 +515,34 @@ mod tests {
 		let source_program = &[Const(I32(0)), I32Sub, Const(I32(3)), I32Add];
 		let target = superoptimize_snippet(source_program, &[], DEFAULT_VALUE_TYPE_CONFIG);
 		assert_eq!(target, vec![Const(I32(-3)), I32Sub]);
+	}
+
+	#[test]
+	fn no_superoptimize_large_const() {
+		let source_program = &[Const(I32(0x1_0000)), I32Add];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 4,
+				i64_size: Some(8),
+			},
+		);
+		assert_eq!(target, source_program);
+	}
+
+	#[test]
+	fn no_superoptimize_large_const_64() {
+		let source_program = &[Const(I64(0x1_0000)), I64Add];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			ValueTypeConfig {
+				i32_size: 4,
+				i64_size: Some(8),
+			},
+		);
+		assert_eq!(target, source_program);
 	}
 
 	// #[test]
