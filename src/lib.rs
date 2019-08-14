@@ -27,23 +27,29 @@ pub fn superoptimize_module(
 		)
 	};
 
+	std::panic::set_hook(Box::new(|_| {}));
 	code_section
 		.bodies_mut()
 		.par_iter_mut()
 		.enumerate()
 		.for_each(|(index, body)| {
-			let func = function_section.entries()[index];
-			let signature = &type_section.types()[func.type_ref() as usize];
-			let params = match signature {
-				Type::Function(f) => f.params(),
-			};
-			superoptimize_func_body(
-				body,
-				params,
-				value_type_config,
-				translation_validation_value_type_config,
-				timeout_ms,
-			)
+			let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+				let func = function_section.entries()[index];
+				let signature = &type_section.types()[func.type_ref() as usize];
+				let params = match signature {
+					Type::Function(f) => f.params(),
+				};
+				superoptimize_func_body(
+					body,
+					params,
+					value_type_config,
+					translation_validation_value_type_config,
+					timeout_ms,
+				)
+			}));
+			if res.is_err() {
+				log::error!("Thread panicked");
+			}
 		});
 }
 
@@ -687,18 +693,19 @@ mod tests {
 	}
 
 	#[test]
+	#[ignore]
 	fn superoptimize_double_const_add() {
-		let source_program = &[GetLocal(1), Const(I32(32)), I32Add, Const(I32(24)), I32Add];
+		let source_program = &[GetLocal(0), Const(I32(32)), I32Add, Const(I32(24)), I32Add];
 		let target = superoptimize_snippet(
 			source_program,
-			&[],
+			&[ValueType::I32],
 			ValueTypeConfig {
 				i32_size: 4,
 				i64_size: Some(8),
 			},
-			DEFAULT_TIMEOUT,
+			None,
 		);
-		assert_eq!(target, vec![GetLocal(1), Const(I32(56)), I32Add]);
+		assert_eq!(target, vec![GetLocal(0), Const(I32(56)), I32Add]);
 	}
 
 	// #[test]

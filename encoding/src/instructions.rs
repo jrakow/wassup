@@ -593,10 +593,11 @@ pub fn initial_stack_types(program: &[Instruction], local_types: &[ValueType]) -
 				}
 
 				if stack.is_empty() {
-					panic!(
+					log::error!(
 						"Insufficient information to compute stack types for snippet {:?}",
 						&program
 					);
+					panic!();
 				} else if stack.len() == 1 {
 					// type of initial stack same as type of operand 1
 					initial_stack.push(stack.pop().unwrap())

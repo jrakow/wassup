@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 either = "1.5.2"
+log = "0.4.8"
 parity-wasm = "0.38.0"
 z3 = { path = "../../z3.rs/z3" }
 

@@ -93,9 +93,15 @@ impl Value {
 				let size = value_type_config.i32_size;
 				if size < 32 {
 					if *i < 0 {
-						assert!((-*i as u32) < 1 << size as u32);
+						if (-*i as u32) >= 1 << size as u32 {
+							log::error!("Integer overflow: {} as I32", i);
+							panic!();
+						}
 					} else {
-						assert!((*i as u32) < 1 << size as u32);
+						if (*i as u32) >= 1 << size as u32 {
+							log::error!("Integer overflow: {} as I32", i);
+							panic!();
+						}
 					}
 				}
 
@@ -109,7 +115,10 @@ impl Value {
 			Value::I64(i) => {
 				let size = value_type_config.i64_size.unwrap();
 				if size < 64 {
-					assert!((*i as u64) < 1 << size as u64);
+					if (*i as u64) >= 1 << size as u64 {
+						log::error!("Integer overflow: {} as I64", i);
+						panic!();
+					}
 				}
 
 				ctx.from_i64(*i).int2bv(size as u64)
