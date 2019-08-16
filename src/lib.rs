@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use wassup_encoding::*;
 use z3::*;
 
+use crate::SuperoptResult::Improved;
 use std::convert::TryInto;
 pub use wassup_encoding::ValueTypeConfig;
 
@@ -107,8 +108,8 @@ pub fn superoptimize_snippet(
 
 	loop {
 		match improve_snippet(&current_best, local_types, value_type_config, timeout_ms) {
-			Some(better) => current_best = better,
-			None => return current_best,
+			Improved(better) => current_best = better,
+			_ => return current_best,
 		}
 
 		if current_best.is_empty() {
@@ -169,12 +170,19 @@ fn const_bounds<'ctx>(
 		.collect()
 }
 
+#[derive(PartialEq)]
+pub enum SuperoptResult {
+	Improved(Vec<Instruction>),
+	Optimal,
+	Timeout,
+}
+
 pub fn improve_snippet(
 	source_program: &[Instruction],
 	local_types: &[ValueType],
 	value_type_config: ValueTypeConfig,
 	timeout_ms: Option<usize>,
-) -> Option<Vec<Instruction>> {
+) -> SuperoptResult {
 	let initial_stack = initial_stack_types(source_program, local_types);
 
 	let config = {
@@ -257,15 +265,15 @@ pub fn improve_snippet(
 			let model = solver.get_model();
 			let better = target_execution.decode_program(&model);
 			log::info!("Optimized {:?} to {:?}", &source_program, &better);
-			Some(better)
+			SuperoptResult::Improved(better)
 		}
 		Some(false) => {
 			log::info!("Proved {:?} optimal", &source_program);
-			None
+			SuperoptResult::Optimal
 		}
 		None => {
 			log::info!("Optimization of {:?} timed out", &source_program);
-			None
+			SuperoptResult::Timeout
 		}
 	}
 }
