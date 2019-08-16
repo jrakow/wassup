@@ -469,6 +469,18 @@ mod tests {
 	}
 
 	#[test]
+	fn superoptimize_eqz() {
+		let source_program = &[Const(I32(0)), I32Eq];
+		let target = superoptimize_snippet(
+			source_program,
+			&[],
+			DEFAULT_VALUE_TYPE_CONFIG,
+			DEFAULT_TIMEOUT,
+		);
+		assert_eq!(target, vec![I32Eqz]);
+	}
+
+	#[test]
 	fn no_superoptimize_setlocal() {
 		let source_program = &[Const(I32(3)), SetLocal(0)];
 
