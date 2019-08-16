@@ -94,12 +94,16 @@ fn initial_stack_values(
 	initial_stack_size: usize,
 	timeout_ms: usize,
 ) -> Option<std::time::Duration> {
-	let source = vec![SetLocal(0); initial_stack_size];
+	let source = if initial_stack_size == 1 {
+		vec![I32Eqz]
+	} else {
+		vec![I32Eq; initial_stack_size - 1]
+	};
 
 	let start = Instant::now();
 	let res = improve_snippet(
 		black_box(&source),
-		&[ValueType::I32],
+		&[],
 		ValueTypeConfig {
 			i32_size: 4,
 			i64_size: Some(8).filter(|_| i64_enabled),
