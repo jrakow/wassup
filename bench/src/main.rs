@@ -6,7 +6,7 @@ use wassup::{improve_snippet, SuperoptResult, ValueTypeConfig};
 use wassup_encoding::{Instruction::*, Value::*};
 
 fn main() {
-	let timeout_ms = 10 * 1000;
+	let timeout_ms = 60 * 60 * 1000;
 
 	let mut results: serde_json::Value =
 		serde_json::from_reader(std::fs::File::open("bench_results.json").unwrap()).unwrap();
