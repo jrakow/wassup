@@ -65,21 +65,6 @@ pub fn superoptimize_func_body(
 	let (instructions, local_types) = (&mut function.instructions, &function.local_types);
 	instructions.par_iter_mut().for_each(|snippet| {
 		if let Either::Left(vec) = snippet {
-			if vec.iter().all(|i| match i {
-				Instruction::Const(_) => true,
-				_ => false,
-			}) {
-				return;
-			}
-
-			if vec.len() == 1 {
-				match vec[0] {
-					Instruction::GetLocal(_) => return,
-					Instruction::Unreachable => return,
-					_ => {}
-				}
-			}
-
 			let optimized =
 				superoptimize_snippet(&vec, &local_types, value_type_config, timeout_ms);
 
@@ -104,6 +89,30 @@ pub fn superoptimize_snippet(
 	value_type_config: ValueTypeConfig,
 	timeout_ms: Option<usize>,
 ) -> Vec<Instruction> {
+	// all sequences of Const and GetLocal are optimal
+	if source_program.iter().all(|i| match i {
+		Instruction::Const(_) => true,
+		Instruction::GetLocal(_) => true,
+		_ => false,
+	}) {
+		log::info!("Proved {:?} optimal (special case)", &source_program);
+		return source_program.to_vec();
+	}
+
+	// Nop is never optimal
+	if source_program.iter().all(|i| *i == Instruction::Nop) {
+		log::info!("Optimized {:?} to [] (special case)", &source_program);
+		return vec![];
+	}
+
+	// All length-1-sequences of non-Nop instructions are optimal
+	if source_program.len() == 1 {
+		assert_ne!(source_program[0], Instruction::Nop);
+		log::info!("Proved {:?} optimal (special case)", &source_program);
+		return source_program.to_vec();
+	}
+
+
 	let mut current_best = source_program.to_vec();
 
 	loop {
